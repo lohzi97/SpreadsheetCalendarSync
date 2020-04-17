@@ -1,0 +1,126 @@
+{
+  "id": "NDFwYzJnNnRkMzNvM2FvZnRocW9nczJlbWogdHRqNDI1azNiYm8wa3RybnMydHN2cThsbjhAZw",
+  "title": "test",
+  "description": "eventDescription",
+  "startTime": new Date(start.year, start.month-1, start.day, start.hours, start.minutes),
+  "endTime": new Date(end.year, end.month-1, end.day, end.hours, end.minutes),
+  "recurrence": null
+}
+
+{
+  "id": "NDFwYzJnNnRkMzNvM2FvZnRocW9nczJlbWogdHRqNDI1azNiYm8wa3RybnMydHN2cThsbjhAZw",
+  "title": "test",
+  "description": "eventDescription",
+  "startTime": new Date(start.year, start.month-1, start.day, start.hours, start.minutes),
+  "endTime": new Date(end.year, end.month-1, end.day, end.hours, end.minutes),
+  "recurrence": {
+    'rule': "day", // day, week, month, year
+    'repeatTimes': 3,
+    'end': "EndAfter",
+    'endTimes': 3,
+    'endDate': {
+      'year': 2020,
+      'month': 3,
+      'day': 30
+    },
+    'repeatMode': "Date", // Date, Week (when rule = month)
+    'repeatOn': ["Mon", "Fri"] // Mon, Tues, Wed, Thurs, Fri, Sat, Sun (when rule = week)
+  }
+}
+
+event = {
+  "id": e.getId(),
+  "title": e.getTitle(),
+  "description": e.getDescription(),
+  "startTime": e.getStartTime(),
+  "endTime": e.getEndTime(),
+  "recurrence": null
+};
+
+// let recurObj = {
+//   'rule': "day", // day, week, month, year
+//   'repeatTimes': 3,
+//   'end': "EndAfter",
+//   'endTimes': 3,
+//   'endDate': {
+//     'year': 2020,
+//     'month': 3,
+//     'day': 30
+//   },
+//   'repeatMode': "Date", // Date, Week (when rule = month)
+//   'repeatOn': ["Mon", "Fri"] // Mon, Tues, Wed, Thurs, Fri, Sat, Sun (when rule = week)
+// };
+
+// let start = {
+//   'year': 2020,
+//   'month': 3,
+//   'day': 15,
+//   'hours': 20,
+//   'minutes': 45,
+// };
+
+// let end = {
+//   'year': 2020,
+//   'month': 3,
+//   'day': 15,
+//   'hours': 20,
+//   'minutes': 45,
+// };
+
+{
+  'date': dateCol,
+  'time': timeCol,
+  'recurrence': recurCol,
+  'titles': titlesCol,
+  'ids': idsCol
+}
+
+//  Title: 
+//  - limit to 1000 characters.
+
+//  Recurrent Format:
+//
+//  "Re:every3Day EndOn:20200414"
+//  Re:everyNUMDay EndOn:DATE
+//  - NUM: any number
+//  - DATE: 20200414
+//
+//  "Re:every1Day EndAfter:10times"
+//  Re:everyNUMDay EndAfter:NUMtimes
+//  - NUM: any number
+//
+//  "Re:every1Week On:[Mon,Tues,Wed] EndOn:20200414"
+//  Re:everyNUMWeek On:[WEEK] EndOn:DATE
+//  - NUM: any number
+//  - WEEK: Mon, Tues, Wed, Thurs, Fri, Sat, Sun
+//  - DATE: 20200414
+//
+//  "Re:every1Week On:[Mon,Tues,Wed] EndAfter:5times"
+//  Re:everyNUMWeek On:[WEEK] EndAfter:NUMtimes
+//  - NUM: any number
+//  - WEEK: Mon, Tues, Wed, Thurs, Fri, Sat, Sun
+//  - DATE: 20200414
+//
+//  "Re:every2Month With:Date EndOn:20200414"
+//  Re:everyNUMMonth With:OPT EndOn:DATE
+//  - NUM: any number
+//  - OPT: Date, Week
+//      Date -> repeat every 2 month on the start start.
+//      Week -> repeat every 2 month on the same day of week.
+//  - DATE: 20200414
+//  
+//  "Re:every2Month With:Week EndAfter:3times" //
+//  Re:everyNUMMonth With:OPT EndAfter:NUMtimes
+//  - NUM: any number
+//  - OPT: Date, Week
+//      Date -> repeat every 2 month on the start start.
+//      Week -> repeat every 2 month on the same day of week.
+//
+//  "Re:every1Year EndOn:20200414"
+//  Re:everyNUMYear EndOn:DATE
+//  - NUM: any number
+//  - DATE: 20200414
+//
+//  "Re:every2Year EndAfter:3times"
+//  Re:everyNUMYear EndAfter:NUMtimes
+//  - NUM: any number

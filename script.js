@@ -1,0 +1,1123 @@
+/**
+ * Person-in-charge:
+ * - Loh Zi Jian, lohzi97@gmail.com
+ * 
+ * Characteristic:
+ * - Event is differentiated by its title name. If the title has been changed, it will be treated as a new event.
+ *   So instead of updating the previous event. A new event will be created and the old event will be deleted. 
+ */
+
+/**
+ * Define parameter.
+ * - All these need to be defined by user.
+ */
+var spreadSheetURL = "https://docs.google.com/spreadsheets/d/1XdYDfoyke-NvJOv9T_4iK6hq3pWtUu74-Sl5WJ7dHZs/edit#gid=0";
+var sheetName = "Sheet1";
+var calendarID = "ttj425k3bbo0ktrns2tsvq8ln8@group.calendar.google.com";
+var headerColor = "#4a86e8";
+var noSyncString = "NOSYNC";
+var headerString ={
+  'date': "Date",
+  'time': "Time",
+  'recurrence': "Recurrence",
+  'titles': ["Title", "Facebook Post 1"],
+  'ids': ['CalendarEventID - Blog', 'CalendarEventID - FB'],
+  'prefix': ["Blog", "FB"]
+}
+var identificationString = "Calendar Sync";
+var syncPeriod = {
+  'yearBefore': 1,
+  'yearAfter': 3
+}
+
+/**
+ * A special function that runs when the spreadsheet is first
+ * opened or reloaded. onOpen() is used to add custom menu
+ * items to the spreadsheet.
+ */
+function onOpen() {
+  let ui = SpreadsheetApp.getUi();
+  ui.createMenu('Sync Calendar')
+    .addItem('Sync To', 'syncTo')
+    .addItem('Sync From', 'syncFrom')
+    .addItem('Clear All', 'clearAll')
+    .addToUi();
+}
+
+/**
+ * Function that update the calendar with spreadsheet.
+ */
+function syncTo() {
+  try {
+
+    // Get the sheet and calendar
+    let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
+    let calendar = CalendarApp.getCalendarById(calendarID);
+
+    // Show a prompt if cannot find the sheet/calendar
+    if (sheet === null || calendar === null) {
+      let promptMsg = "";
+      if (sheet === null) { promptMsg = promptMsg + `Unable to find ${sheetName} in ${spreadSheetURL}. \n`; }
+      if (calendar === null) { promptMsg = promptMsg + `Failed to get your calendar: ${calendarID}. \n` }
+      throw new Error(promptMsg);
+    }
+    
+    // Get an array of event that defined in the sheet
+    let sheetEvents = getSheetEvents_(sheet);
+
+    // Get an array of event that previously has set in calendar
+    let calendarEvents = getCalenderEvents_(calendar);
+    
+    // Compare sheetEvents and calendarEvents, extract those isn't exactly same.
+    let diffEvents = compareEvents_(sheetEvents, calendarEvents);
+
+    // From the diffEvents, perform the following to sync sheet to calendar:
+    // - create event if "belong" field is "sheet"
+    // - delete event if "belong" field is "calendar"
+    // - update event if "belong" field is "sheet&"
+    // - delete the event series and recreate an event if "belong" field is "sheet&DR"
+    // - delete the event and recreate an event series if "belong" field is "sheetAR"
+    let createdEvents = [];
+    let deletedEvents = [];
+    for (let i = 0; i < diffEvents.length; i++) {
+      let event = diffEvents[i];
+      if (event.belong === "sheet") {
+        if (event.recurrence === "null") {
+          let createdE = calendar.createEvent(
+            event.title,
+            event.startTime,
+            event.endTime,
+            {'description': event.description}
+          ).setTag('identification', `Created by "${identificationString}" spreadsheet.`);
+          createdEvents.push(calanderToEvent_(createdE));
+        }
+        else {
+          let createdE = calendar.createEventSeries(
+            event.title,
+            event.startTime,
+            event.endTime,
+            formRecurrenceRule_(event),
+            {'description': event.description}
+          ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
+          createdEvents.push({
+            "id": event.id,
+            "title": event.title,
+            "description": event.description,
+            "startTime": event.startTime,
+            "endTime": event.endTime,
+            "recurrence": event.recurrence
+          });
+        }
+      }
+      else if (event.belong === "calendar") {
+        
+        // Find the event or event series and delete it.
+        if (event.recurrence === "null") {
+          let calEvent = calendar.getEventById(event.id);
+          calEvent.deleteEvent();
+        }
+        else {
+          let calEvent = calendar.getEventById(event.id);
+          let calEventSeries = calEvent.getEventSeries();
+          calEventSeries.deleteEventSeries();
+        }
+        deletedEvents.push(event);
+
+      }
+      else if (event.belong === "sheet&") {
+        if (event.recurrence === "null") {
+          let calEvent = calendar.getEventById(event.id);
+          let eObj = calanderToEvent_(calEvent);
+          if (event.title !== eObj.title) {
+            calEvent.setTitle(event.title);
+          }
+          if (event.startTime.getTime() !== eObj.startTime.getTime() || event.endTime.getTime() !== eObj.endTime.getTime()) {
+            calEvent.setTime(event.startTime, event.endTime);
+          }
+        }
+        else {
+          let calEvent = calendar.getEventById(event.id);
+          let calEventSeries = calEvent.getEventSeries();
+          let eSeriesObj = calanderToEvent_(calEvent);
+          if (event.title !== eSeriesObj.title) {
+            calEventSeries.setTitle(event.title);
+          }
+          if (
+            event.startTime.getTime() !== eSeriesObj.startTime.getTime() || 
+            event.endTime.getTime() !== eSeriesObj.endTime.getTime() ||
+            event.recurrence.rule !== eSeriesObj.recurrence.rule ||
+            event.recurrence.repeatTimes !== eSeriesObj.recurrence.repeatTimes ||
+            event.recurrence.end !== eSeriesObj.recurrence.end ||
+            event.recurrence.endTimes !== eSeriesObj.recurrence.endTimes ||
+            event.recurrence.endDate.year !== eSeriesObj.recurrence.endDate.year ||
+            event.recurrence.endDate.month !== eSeriesObj.recurrence.endDate.month ||
+            event.recurrence.endDate.day !== eSeriesObj.recurrence.endDate.day ||
+            event.recurrence.endTimes !== eSeriesObj.recurrence.endTimes ||
+            event.recurrence.repeatMode !== eSeriesObj.recurrence.repeatMode ||
+            !arrayIsEqual_(event.recurrence.repeatOn, eSeriesObj.recurrence.repeatOn)
+          ) {
+            calEventSeries.setRecurrence(formRecurrenceRule_(event), event.startTime, event.endTime);
+          }
+        }
+      }
+      else if (event.belong === "sheet&DR") {
+        let calEvent = calendar.getEventById(event.id);
+        let calEventSeries = calEvent.getEventSeries();
+        calEventSeries.deleteEventSeries();
+        deletedEvents.push(event);
+        let createdE = calendar.createEvent(
+          event.title,
+          event.startTime,
+          event.endTime,
+          {'description': event.description}
+        ).setTag('identification', `Created by "${identificationString}" spreadsheet.`);
+        createdEvents.push(calanderToEvent_(createdE));
+      }
+      else if (event.belong === "sheet&AR") {
+        let calEvent = calendar.getEventById(event.id);
+        calEvent.deleteEvent();
+        deletedEvents.push(event);
+        let createdE = calendar.createEventSeries(
+          event.title,
+          event.startTime,
+          event.endTime,
+          formRecurrenceRule_(event),
+          {'description': event.description}
+        ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
+        createdEvents.push({
+          "id": event.id,
+          "title": event.title,
+          "description": event.description,
+          "startTime": event.startTime,
+          "endTime": event.endTime,
+          "recurrence": event.recurrence
+        });
+      }
+    }
+
+    // Begin modify the spreadsheet. It includes:
+    // - adding Calendar Event IDs
+    // - modify certain cell format if contradiction occur
+
+    // Find the header row, which is defined by a specific background color.
+    let headerRow = getHeaderRow_(sheet);
+
+    // Find the column that contain the info of the calendar events.
+    let infoCol = getInfoColumn_(sheet, headerRow);
+
+    // Get all the relevant data in the spreadsheet.
+    let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
+    let dataRange = sheet.getRange(dataA1Notation);
+    let data = dataRange.getValues();
+
+    // Loop through the data row by row, and check if that row requires edit or not.
+    for (let i = 0; i < data.length; i++) {
+      
+      // If the Event ID matched one of the deleted event's id, then delete the Event ID.
+      for (let j = 0; j < infoCol.ids.length; j++) {
+        for (const event of deletedEvents) {
+          if (data[i][infoCol.ids[j]] === event.id) {
+            let cellA1Notation = lettersFromIndex_(infoCol.ids[j]+1) + i.toString();
+            let cell = sheet.getRange(cellA1Notation);
+            cell.clearContent();
+            break;
+          } 
+        }
+      }
+
+      // If the title, startTime, endTime and recurrent of that row is same with one of the created event,
+      // add event.id to the Event ID column.
+      let eventFromRow = sheetRowToEvent_(data[i], infoCol);
+      for (const e of eventFromRow) {
+        for (const event of createdEvents) {
+          if (
+            (
+              e.title === event.title &&
+              e.startTime.getTime() === event.startTime.getTime() &&
+              e.endTime.getTime() === event.endTime.getTime() &&
+              e.recurrence === "null" && event.recurrence === "null"
+            ) 
+            ||
+            (
+              e.title === event.title &&
+              e.startTime.getTime() === event.startTime.getTime() &&
+              e.endTime.getTime() === event.endTime.getTime() &&
+              e.recurrence.rule === event.recurrence.rule &&
+              e.recurrence.repeatTimes === event.recurrence.repeatTimes &&
+              e.recurrence.end === event.recurrence.end &&
+              e.recurrence.endTimes === event.recurrence.endTimes &&
+              e.recurrence.endDate.year === event.recurrence.endDate.year &&
+              e.recurrence.endDate.month === event.recurrence.endDate.month &&
+              e.recurrence.endDate.day === event.recurrence.endDate.day &&
+              e.recurrence.repeatMode === event.recurrence.repeatMode &&
+              arrayIsEqual_(e.recurrence.repeatOn, event.recurrence.repeatOn)
+            )
+          ) {
+            // Find the column of title. 
+            let titleCol;
+            for (let j = 0; j < data[i].length; j++) {
+              if (data[i][j] === event.title) {
+                titleCol = j;
+              }
+            }
+            // Check which index in headerString.titles that title is in.
+            let idx;
+            for (let j = 0; j < infoCol.titles.length; j++) {
+              if (infoCol.titles[j] === titleCol) {
+                idx = j;
+              }
+            }
+            // Add the event id to the id column.
+            let idCol = infoCol.ids[idx];
+            let cellA1Notation = lettersFromIndex_(idCol+1) + i.toString();
+            let cell = sheet.getRange(cellA1Notation);
+            cell.setValue(event.id);
+          }
+        }
+      }
+
+    }
+
+    // show a dialog box to indicate sync has completed.
+    SpreadsheetApp.getUi().alert(`Sync Complete.`);
+    
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(error);
+  }
+  return;
+}
+
+/**
+ * Function that update the spreadsheet with calendar.
+ */
+function syncFrom() {
+  try {
+
+    // Get the sheet and calendar
+    let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
+    let calendar = CalendarApp.getCalendarById(calendarID);
+    
+    // Show a prompt if cannot find the sheet/calendar
+    if (sheet === null || calendar === null) {
+      let promptMsg = "";
+      if (sheet === null) { promptMsg = promptMsg + `Unable to find ${sheetName} in ${spreadSheetURL}. \n`; }
+      if (calendar === null) { promptMsg = promptMsg + `Failed to get your calendar: ${calendarID}. \n` }
+      throw new Error(promptMsg);
+    }
+
+    // Get an array of event that defined in the sheet
+    let sheetEvents = getSheetEvents_(sheet);
+
+    // Get an array of event that previously has set in calendar
+    let calendarEvents = getCalenderEvents_(calendar);
+    
+    // Compare sheetEvents and calendarEvents, extract those isn't exactly same.
+    let diffEvents = compareEvents_(sheetEvents, calendarEvents);
+
+    // From the diffEvents, perform the following to sync calendar to sheet:
+    // - create a new row and add info to it if "belong" field is "calendar"
+    // - add noSyncString to title if "belong" field is "sheet"
+    // - update the row info if "belong" field is "calendar&", "calendar&AR" "calendar&DR"
+    for (let i = 0; i < diffEvents.length; i++) {
+      let event = diffEvents[i];
+      if (event.belong === "calendar") {
+        
+      }
+    }
+
+    // show a dialog box to indicate sync has completed.
+    SpreadsheetApp.getUi().alert(`Sync Complete.`);
+    
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(error);
+  }
+  return;
+}
+
+/**
+ * Function that delete all the calendar event that is created by this spreadsheet.
+ * Basically this is a hard refrest type of thing. If anything goes wrong, clear all, then resycn it with the canlendar.
+ */
+function clearAll() {
+
+  try {
+
+    let calendar = CalendarApp.getCalendarById(calendarID);
+
+    // Show a prompt if cannot find the sheet/calendar
+    if (calendar === null) {
+      let promptMsg = "";
+      if (calendar === null) { promptMsg = promptMsg + `Failed to get your calendar: ${calendarID}. \n` }
+      throw new Error(promptMsg);
+    }
+
+    let events = getCalenderEvents_(calendar);
+
+    for (const event of events) {
+      if (event.recurrence === "null") {
+        let calEvent = calendar.getEventById(event.id);
+        calEvent.deleteEvent();
+      }
+      else {
+        let calEvent = calendar.getEventById(event.id);
+        let calEventSeries = calEvent.getEventSeries();
+        calEventSeries.deleteEventSeries();
+      }
+    }
+
+    // show a dialog box to indicate clear has completed.
+    SpreadsheetApp.getUi().alert(`Clear Complete.`);
+
+  } catch (error) {
+    SpreadsheetApp.getUi().alert(error);
+  }
+  return;
+}
+
+/**
+ * Helper function that capture all the event in spreadsheet.
+ */
+function getSheetEvents_(sheet) {
+  
+  // Create an events array to store all the event.
+  let events = [];
+
+  // Find the header row, which is defined by a specific background color.
+  let headerRow = getHeaderRow_(sheet);
+
+  // Find the column that contain the info of the calendar events.
+  let infoCol = getInfoColumn_(sheet, headerRow);
+  
+  // Get all the relevant data in the spreadsheet.
+  let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
+  let data = sheet.getRange(dataA1Notation).getValues();
+  
+  // Loop through the all the data row by row.
+  // If there is a valid event, make an object to push into events array.
+  selfGenID = 0;
+  for (let i = 0; i < data.length; i++) {
+
+    // Skip rows that does not have date, time and any title info.
+    if (data[i][infoCol.date] === "" || data[i][infoCol.time] === "" || !containValidTitlesData(data[i], infoCol.titles)) {
+      continue;
+    }
+
+    let formedEvents = sheetRowToEvent_(data[i], infoCol);
+    events = events.concat(formedEvents);
+
+  }
+
+  return events;
+
+  /**
+   * Function to check whether or not the row contain any titles data, and check whether the data is all marked with noSyncString.
+   * @param {[]} data1D row of the data
+   * @param {[]} titlesCol an array which represent the column index of each title data.
+   * @returns {boolean} Return true if there is at least contain one title data. Otherwise false.
+   */
+  function containValidTitlesData(data1D, titlesCol) {
+    let noSyncRegEx = new RegExp(noSyncString + '(\\w|\\d|\\s)*');
+    let count = 0;
+    for (const titleCol of titlesCol) {
+      if (data1D[titleCol] !== "" && !noSyncRegEx.test(data1D[titleCol])) {
+        count++;
+      }
+    }
+    if (count === 0) {
+      return false;
+    }
+    else {
+      return true;
+    }
+  }
+  
+}
+
+/**
+ * Helper function that capture all the event in calander.
+ */
+function getCalenderEvents_(calendar) {
+
+  // Create an events array to store all the event.
+  let events = [];
+
+  // Get all the events that occur within defined sync period.
+  let syncStartDate = new Date();
+  syncStartDate.setFullYear(syncStartDate.getFullYear() - syncPeriod.yearBefore);
+  let syncEndDate = new Date();
+  syncEndDate.setFullYear(syncEndDate.getFullYear() + syncPeriod.yearAfter);
+  let calEvents = calendar.getEvents(syncStartDate, syncEndDate);
+
+  // Loop through all the calendar events. Extract the event that is created by this script and place it into events array.
+  for (const e of calEvents) {
+
+    // SKip the events that does not contain `Created by "${identificationString}" spreadsheet.` tag.
+    let tagKeys = e.getAllTagKeys();
+    if (!tagKeys.includes('identification')) {
+      continue;
+    }
+    else {
+      let tagStr = `Created by "${identificationString}" spreadsheet.`;
+      if (e.getTag('identification') !== tagStr) {
+        continue;
+      }
+    }
+
+    // Check if the event is part of a recurring event.
+    if (e.isRecurringEvent()) {
+      let repeated = false;
+      for (let i = 0; i < events.length; i++) {
+        let title = e.getTitle();
+        if (events[i].title === title) {
+          repeated = true;
+          break;
+        }
+      }
+      if (repeated) {
+        continue;
+      }
+    }
+
+    events.push(calanderToEvent_(e));
+    
+  }
+
+  return events;
+
+}
+
+/**
+ * Helper function that compare the events array.
+ */
+function compareEvents_(sheetEvents, calendarEvents) {
+
+  // Create an diffEvents array to store all different event.
+  let diffEvents = [];
+
+  // Generate an array of IDs of events that is unique in its kind.
+  let IDsArr = [];
+  for (const sheetEvent of sheetEvents) {
+    IDsArr.push(sheetEvent.id);
+  }
+  for (const calendarEvent of calendarEvents) {
+    IDsArr.push(calendarEvent.id);
+  }
+  let uniqueID = Array.from(new Set(IDsArr));
+
+  // Loop through the uniqueID array to check does the event:
+  // - only exist in sheetEvents 
+  // - only exist in calendarEvents
+  // - exsit in both sheetEvents and calendar Events.
+  for (const id of uniqueID) {
+
+    // Find where does the event located in sheetEvents array and calendarEvents array.
+    let sheetEventsIdx;
+    let calendarEventsIdx;
+    for (let i = 0; i < sheetEvents.length; i++) {
+      if (id === sheetEvents[i].id) {
+        sheetEventsIdx = i;
+        break;
+      }
+    }
+    for (let i = 0; i < calendarEvents.length; i++) {
+      if (id === calendarEvents[i].id) {
+        calendarEventsIdx = i;
+        break;
+      }
+    }
+
+    if (typeof(sheetEventsIdx) !== "undefined" && typeof(calendarEventsIdx) !== "undefined") {
+      if (sheetEvents[sheetEventsIdx].recurrence === "null" && calendarEvents[calendarEventsIdx].recurrence !== "null") {
+        diffEvents.push({
+          "belong": "sheet&DR",
+          "id": sheetEvents[sheetEventsIdx].id,
+          "title": sheetEvents[sheetEventsIdx].title,
+          "description": sheetEvents[sheetEventsIdx].description,
+          "startTime": sheetEvents[sheetEventsIdx].startTime,
+          "endTime": sheetEvents[sheetEventsIdx].endTime,
+          "recurrence": sheetEvents[sheetEventsIdx].recurrence
+        });
+        diffEvents.push({
+          "belong": "calendar&AR",
+          "id": calendarEvents[calendarEventsIdx].id,
+          "title": calendarEvents[calendarEventsIdx].title,
+          "description": calendarEvents[calendarEventsIdx].description,
+          "startTime": calendarEvents[calendarEventsIdx].startTime,
+          "endTime": calendarEvents[calendarEventsIdx].endTime,
+          "recurrence": calendarEvents[calendarEventsIdx].recurrence
+        });
+      }
+      else if (sheetEvents[sheetEventsIdx].recurrence !== "null" && calendarEvents[calendarEventsIdx].recurrence === "null") {
+        diffEvents.push({
+          "belong": "sheet&AR",
+          "id": sheetEvents[sheetEventsIdx].id,
+          "title": sheetEvents[sheetEventsIdx].title,
+          "description": sheetEvents[sheetEventsIdx].description,
+          "startTime": sheetEvents[sheetEventsIdx].startTime,
+          "endTime": sheetEvents[sheetEventsIdx].endTime,
+          "recurrence": sheetEvents[sheetEventsIdx].recurrence
+        });
+        diffEvents.push({
+          "belong": "calendar&DR",
+          "id": calendarEvents[calendarEventsIdx].id,
+          "title": calendarEvents[calendarEventsIdx].title,
+          "description": calendarEvents[calendarEventsIdx].description,
+          "startTime": calendarEvents[calendarEventsIdx].startTime,
+          "endTime": calendarEvents[calendarEventsIdx].endTime,
+          "recurrence": calendarEvents[calendarEventsIdx].recurrence
+        });
+      }
+      else if (
+        (
+          (
+            sheetEvents[sheetEventsIdx].recurrence === "null" && calendarEvents[calendarEventsIdx].recurrence === "null"
+          ) &&
+          (
+            sheetEvents[sheetEventsIdx].title !== calendarEvents[calendarEventsIdx].title ||
+            sheetEvents[sheetEventsIdx].startTime.getTime() !== calendarEvents[calendarEventsIdx].startTime.getTime() ||
+            sheetEvents[sheetEventsIdx].endTime.getTime() !== calendarEvents[calendarEventsIdx].endTime.getTime()
+          )
+        ) || 
+        (
+          (
+            sheetEvents[sheetEventsIdx].recurrence !== "null" && calendarEvents[calendarEventsIdx].recurrence !== "null"
+          ) &&
+          (
+            sheetEvents[sheetEventsIdx].title !== calendarEvents[calendarEventsIdx].title ||
+            sheetEvents[sheetEventsIdx].startTime.getTime() !== calendarEvents[calendarEventsIdx].startTime.getTime() ||
+            sheetEvents[sheetEventsIdx].endTime.getTime() !== calendarEvents[calendarEventsIdx].endTime.getTime() ||
+            sheetEvents[sheetEventsIdx].recurrence.rule !== calendarEvents[calendarEventsIdx].recurrence.rule ||
+            sheetEvents[sheetEventsIdx].recurrence.repeatTimes !== calendarEvents[calendarEventsIdx].recurrence.repeatTimes ||
+            sheetEvents[sheetEventsIdx].recurrence.end !== calendarEvents[calendarEventsIdx].recurrence.end ||
+            sheetEvents[sheetEventsIdx].recurrence.endTimes !== calendarEvents[calendarEventsIdx].recurrence.endTimes ||
+            sheetEvents[sheetEventsIdx].recurrence.endDate.year !== calendarEvents[calendarEventsIdx].recurrence.endDate.year ||
+            sheetEvents[sheetEventsIdx].recurrence.endDate.month !== calendarEvents[calendarEventsIdx].recurrence.endDate.month ||
+            sheetEvents[sheetEventsIdx].recurrence.endDate.day !== calendarEvents[calendarEventsIdx].recurrence.endDate.day ||
+            sheetEvents[sheetEventsIdx].recurrence.repeatMode !== calendarEvents[calendarEventsIdx].recurrence.repeatMode ||
+            !arrayIsEqual_(sheetEvents[sheetEventsIdx].recurrence.repeatOn, calendarEvents[calendarEventsIdx].recurrence.repeatOn)
+          )
+        )
+      ) {
+        diffEvents.push({
+          "belong": "sheet&",
+          "id": sheetEvents[sheetEventsIdx].id,
+          "title": sheetEvents[sheetEventsIdx].title,
+          "description": sheetEvents[sheetEventsIdx].description,
+          "startTime": sheetEvents[sheetEventsIdx].startTime,
+          "endTime": sheetEvents[sheetEventsIdx].endTime,
+          "recurrence": sheetEvents[sheetEventsIdx].recurrence
+        });
+        diffEvents.push({
+          "belong": "calendar&",
+          "id": calendarEvents[calendarEventsIdx].id,
+          "title": calendarEvents[calendarEventsIdx].title,
+          "description": calendarEvents[calendarEventsIdx].description,
+          "startTime": calendarEvents[calendarEventsIdx].startTime,
+          "endTime": calendarEvents[calendarEventsIdx].endTime,
+          "recurrence": calendarEvents[calendarEventsIdx].recurrence
+        });
+      }
+    }
+    else if (typeof(sheetEventsIdx) !== "undefined") {
+      diffEvents.push({
+        "belong": "sheet",
+        "id": sheetEvents[sheetEventsIdx].id,
+        "title": sheetEvents[sheetEventsIdx].title,
+        "description": sheetEvents[sheetEventsIdx].description,
+        "startTime": sheetEvents[sheetEventsIdx].startTime,
+        "endTime": sheetEvents[sheetEventsIdx].endTime,
+        "recurrence": sheetEvents[sheetEventsIdx].recurrence
+      });
+    }
+    else {
+      diffEvents.push({
+        "belong": "calendar",
+        "id": calendarEvents[calendarEventsIdx].id,
+        "title": calendarEvents[calendarEventsIdx].title,
+        "description": calendarEvents[calendarEventsIdx].description,
+        "startTime": calendarEvents[calendarEventsIdx].startTime,
+        "endTime": calendarEvents[calendarEventsIdx].endTime,
+        "recurrence": calendarEvents[calendarEventsIdx].recurrence
+      });
+    }
+    
+  }
+
+  return diffEvents;
+
+}
+
+/**
+ * Helper function that take a whole row of into the event obejct that is used throughout this script.
+ */
+var selfGenID = 0;
+function sheetRowToEvent_(rowOfData, infoCol) {
+
+  let formedEvents = [];
+
+  let dateCol = infoCol.date;
+  let timeCol = infoCol.time;
+  let recurCol = infoCol.recurrence;
+  let titlesCol = infoCol.titles;
+  let idsCol = infoCol.ids;
+
+  let date = typeof(rowOfData[dateCol]) === "number" ? rowOfData[dateCol].toString() : rowOfData[dateCol];
+  let time = typeof(rowOfData[timeCol]) === "number" ? rowOfData[timeCol].toString() : rowOfData[timeCol];
+  let recur = rowOfData[recurCol];
+
+  // Verify the date, time and recurrence input, and then
+  // format the date, time and recurrence into Javascript Date object, for setting the startTime and endTime of event.
+  let dateRegEx = /\d{8}/;
+  let timeRegEx = /\d{4}/;
+  let recurRegEx1 = /Re:every\d+(Day|Week|Month|Year)/i;
+  let recurRegEx2_1 = /On:\[\D*?\]/i;
+  let recurRegEx2_2 = /Mon|Tues|Wed|Thurs|Fri|Sat|Sun/gi;
+  let recurRegEx3 = /With:(Date|Week)/i;
+  let recurRegEx4 = /End(On:\d{8}|After:\d+times)/i;
+  let recurrence;
+  let start = {};
+  let end = {};
+  let dateArr = date.split("-");
+  let timeArr = time.split("-");
+  let recurArr = recur.split(" ");
+
+  // Process date.
+  if (dateArr.length > 2) {
+    throw new Error(`Error: Invalid date format.\nMore than 1 hyphen detected in date coloum of row ${i}, counted from header.`);
+  }
+  for (const d of dateArr) {
+    if (!dateRegEx.test(d)) {
+      throw new Error(`Error: Invalid date format.\nDate should be in YYYYMMDD format. Eg: 20200401. Error found in date column of row ${i}, counted from header.`);
+    }
+  }
+  start.year = parseInt(dateArr[0].slice(0,4));
+  start.month = parseInt(dateArr[0].slice(4,6));
+  start.day = parseInt(dateArr[0].slice(6));
+  if (dateArr.length === 1) {
+    end.year = start.year;
+    end.month = start.month;
+    end.day = start.day;
+  }
+  else {
+    end.year = parseInt(dateArr[1].slice(0,4));
+    end.month = parseInt(dateArr[1].slice(4,6));
+    end.day = parseInt(dateArr[1].slice(6));
+  }
+
+  // Process time.
+  if (timeArr.length > 2) {
+    throw new Error(`Error: Invalid time format.\nMore than 1 hyphen detected in time coloum of row ${i}, counted from header.`);
+  }
+  for (const t of timeArr) {
+    if (!timeRegEx.test(t)) {
+      throw new Error(`Error: Invalid time format.\nTime should be in 24 Hour format. Eg: 0800. Error found in date column of row ${i}, counted from header.`);
+    }
+  }
+  start.hours = parseInt(timeArr[0].slice(0,2));
+  start.minutes = parseInt(timeArr[0].slice(2));
+  if (timeArr.length === 1) {
+    end.hours = start.hours + 1;
+    end.minutes = start.minutes;
+  }
+  else {
+    end.hours = parseInt(timeArr[1].slice(0,2));
+    end.minutes = parseInt(timeArr[1].slice(2));
+  }
+
+  let startTime = new Date(start.year, start.month-1, start.day, start.hours, start.minutes);
+  let endTime = new Date(end.year, end.month-1, end.day, end.hours, end.minutes);
+
+  // Process recurrence.
+  if (recur !== "") {
+    recurrence = {
+      'rule': "null",
+      'repeatTimes': "null",
+      'end': "null",
+      'endTimes': "null",
+      'endDate': {
+        'year': "null",
+        'month': "null",
+        'day': "null"
+      },
+      'repeatMode': "null",
+      'repeatOn': ["null"]
+    };
+    if (recurArr.length > 3) {
+      throw new Error(`Error: Invalid recurrence format.\nMore than 3 section detected in recurrence coloum of row ${i}, counted from header.`);
+    }
+    if (!recurRegEx1.test(recurArr[0])) {
+      throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format. Error found in recurrence column of row ${i}, counted from header.`);
+    }
+    let recurRuleIdx = recurArr[0].search(/Day|Week|Month|Year/i);
+    recurrence.rule = recurArr[0].slice(recurRuleIdx).toLowerCase();
+    recurrence.repeatTimes = parseInt(recurArr[0].slice(8, recurRuleIdx));
+    if (recurrence.rule === "week") {
+      if (!recurRegEx2_1.test(recurArr[1])) {
+        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence week. Error found in recurrence column of row ${i}, counted from header.`);
+      }
+      recurrence.repeatOn = recurArr[1].match(recurRegEx2_2);
+      if (recurrence.repeatOn === null) {
+        throw new Error(`Error: Invalid recurrence format.\nUnable to identify which day(s) of the week to repeat. Error found in recurrence column of row ${i}, counted from header.`);
+      }
+      if (recurArr.length === 3) {
+        if (!recurRegEx4.test(recurArr[2])) {
+          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence week. Error found in recurrence column of row ${i}, counted from header.`);
+        }
+        let tempArr = recurArr[2].split(':');
+        recurrence.end = tempArr[0];
+        if (tempArr[0] === "EndAfter") {
+          recurrence.endTimes = parseInt(tempArr[1].slice(0,-5));
+        }
+        else {
+          recurrence.endDate.year = parseInt(tempArr[1].slice(0,4));
+          recurrence.endDate.month = parseInt(tempArr[1].slice(4,6));
+          recurrence.endDate.day = parseInt(tempArr[1].slice(6));
+          let endOn = new Date(recurrence.endDate.year, recurrence.endDate.month-1, recurrence.endDate.day);
+          if (endTime.getTime() >= endOn.getTime()) {
+            throw new Error(`Error: Invalid recurrence value. \nThe recurrence endOn date must be greater than the event end date.`);
+          }
+        }
+      }
+    }
+    else if (recurrence.rule === "month") {
+      if (!recurRegEx3.test(recurArr[1])) {
+        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence month. Error found in recurrence column of row ${i}, counted from header.`);
+      }
+      recurrence.repeatMode = recurArr[1].slice(5);
+      if (recurArr.length === 3) {
+        if (!recurRegEx4.test(recurArr[2])) {
+          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence month. Error found in recurrence column of row ${i}, counted from header.`);
+        }
+        let tempArr = recurArr[2].split(':');
+        recurrence.end = tempArr[0];
+        if (tempArr[0] === "EndAfter") {
+          recurrence.endTimes = parseInt(tempArr[1].slice(0,-5));
+        }
+        else {
+          recurrence.endDate.year = parseInt(tempArr[1].slice(0,4));
+          recurrence.endDate.month = parseInt(tempArr[1].slice(4,6));
+          recurrence.endDate.day = parseInt(tempArr[1].slice(6));
+          let endOn = new Date(recurrence.endDate.year, recurrence.endDate.month-1, recurrence.endDate.day);
+          if (endTime.getTime() >= endOn.getTime()) {
+            throw new Error(`Error: Invalid recurrence value. \nThe recurrence endOn date must be greater than the event end date.`);
+          }
+        }
+      }
+    }
+    else {
+      if (recurArr.length === 3) {
+        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence day/year. Error found in recurrence column of row ${i}, counted from header.`);
+      }
+      else if (recurArr.length === 2) {
+        if (!recurRegEx4.test(recurArr[1])) {
+          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence day/year. Error found in recurrence column of row ${i}, counted from header.`);
+        }
+        let tempArr = recurArr[1].split(':');
+        recurrence.end = tempArr[0];
+        if (tempArr[0] === "EndAfter") {
+          recurrence.endTimes = parseInt(tempArr[1].slice(0,-5));
+        }
+        else {
+          recurrence.endDate.year = parseInt(tempArr[1].slice(0,4));
+          recurrence.endDate.month = parseInt(tempArr[1].slice(4,6));
+          recurrence.endDate.day = parseInt(tempArr[1].slice(6));
+          let endOn = new Date(recurrence.endDate.year, recurrence.endDate.month-1, recurrence.endDate.day);
+          if (endTime.getTime() >= endOn.getTime()) {
+            throw new Error(`Error: Invalid recurrence value. \nThe recurrence endOn date must be greater than the event end date.`);
+          }
+        }
+      }
+    }
+  }
+
+  // Prepare the title and description of the event, and then push all the event into into the formedEvents array.
+  let eventDescription = `Created by "${identificationString}" spreadsheet.`
+  for (let i = 0; i < titlesCol.length; i++) {
+
+    // Skip create event if the title column does not have any value, or it has noSyncString at the begining of the title.
+    let noSyncRegEx = new RegExp(noSyncString + '(\\w|\\d|\\s)*');
+    if (rowOfData[titlesCol[i]] === "" || noSyncRegEx.test(rowOfData[titlesCol[i]])) {
+      continue;
+    }
+
+    let eventTitle = headerString.prefix[i] + " - " + rowOfData[titlesCol[i]].slice(0,1000);
+    let eventID;
+    if (rowOfData[idsCol[i]] !== "") { 
+      eventID = rowOfData[idsCol[i]]; 
+    }
+    else {
+      eventID = selfGenID;
+      selfGenID++;
+    }
+
+    formedEvents.push({
+      "id": eventID,
+      "title": eventTitle,
+      "description": eventDescription,
+      "startTime": startTime,
+      "endTime": endTime,
+      "recurrence": recurrence
+    });
+
+  }
+
+  return formedEvents;
+
+}
+
+/**
+ * Helper function that take a convert calendar event into event object that is used throughout this script.
+ */
+function calanderToEvent_(calendarEvent) {
+  let id = calendarEvent.getId();
+  let title = calendarEvent.getTitle();
+  let description = calendarEvent.getDescription();
+  let startTime = calendarEvent.getStartTime();
+  let endTime = calendarEvent.getEndTime();
+  let event = {
+    'id': id,
+    'title': title,
+    'description': description,
+    'startTime': startTime,
+    'endTime': endTime,
+    'recurrence': "null"
+  };
+  if (calendarEvent.isRecurringEvent()) {
+    let recurrence = calendarEvent.getTag('recurrence');
+    event.recurrence = JSON.parse(recurrence);
+  }
+  return event;
+}
+
+/**
+ * Helper function that generate recurrence rule for calendar.
+ */
+function formRecurrenceRule_(event) {
+  let recurRule;
+  if (event.recurrence.rule === "day") {
+    if (event.recurrence.end.toLowerCase() === "endafter") {
+      recurRule = CalendarApp.newRecurrence().addDailyRule().interval(event.recurrence.repeatTimes).times(event.recurrence.endTimes);
+    }
+    else if (event.recurrence.end.toLowerCase() === "endon") {
+      recurRule = CalendarApp.newRecurrence().addDailyRule().interval(event.recurrence.repeatTimes).until(new Date(event.recurrence.endDate.year, event.recurrence.endDate.month-1, event.recurrence.endDate.day));
+    }
+    else {
+      recurRule = CalendarApp.newRecurrence().addDailyRule().interval(event.recurrence.repeatTimes);
+    }
+  }
+  else if (event.recurrence.rule === "week") {
+    let repeatOn = [];
+    for (const week of event.recurrence.repeatOn) {
+      if (week.toLowerCase() === "mon") { repeatOn.push(CalendarApp.Weekday.MONDAY); }
+      else if (week.toLowerCase() === "tues") { repeatOn.push(CalendarApp.Weekday.TUESDAY); }
+      else if (week.toLowerCase() === "wed") { repeatOn.push(CalendarApp.Weekday.WEDNESDAY); }
+      else if (week.toLowerCase() === "thurs") { repeatOn.push(CalendarApp.Weekday.THURSDAY); }
+      else if (week.toLowerCase() === "fri") { repeatOn.push(CalendarApp.Weekday.FRIDAY); }
+      else if (week.toLowerCase() === "sat") { repeatOn.push(CalendarApp.Weekday.SATURDAY); }
+      else { repeatOn.push(CalendarApp.Weekday.SUNDAY); }
+    }
+    if (event.recurrence.end.toLowerCase() === "endafter") {
+      recurRule = CalendarApp.newRecurrence().addWeeklyRule().interval(event.recurrence.repeatTimes).onlyOnWeekdays(repeatOn).times(event.recurrence.endTimes);
+    }
+    else if (event.recurrence.end.toLowerCase() === "endon") {
+      recurRule = CalendarApp.newRecurrence().addWeeklyRule().interval(event.recurrence.repeatTimes).onlyOnWeekdays(repeatOn).until(new Date(event.recurrence.endDate.year, event.recurrence.endDate.month-1, event.recurrence.endDate.day));
+    }
+    else {
+      recurRule = CalendarApp.newRecurrence().addWeeklyRule().interval(event.recurrence.repeatTimes).onlyOnWeekdays(repeatOn);
+    }
+  }
+  else if (event.recurrence.rule === "month") {
+    if (event.recurrence.repeatMode.toLowerCase() === "date") {
+      let dayOfMonth = event.startTime.getDate();
+      if (event.recurrence.end.toLowerCase() === "endafter") {
+        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnMonthDay(dayOfMonth).times(event.recurrence.endTimes);
+      }
+      else if (event.recurrence.end.toLowerCase() === "endon") {
+        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnMonthDay(dayOfMonth).until(new Date(event.recurrence.endDate.year, event.recurrence.endDate.month-1, event.recurrence.endDate.day));
+      }
+      else {
+        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnMonthDay(dayOfMonth);
+      }
+    }
+    else {
+      let dayOfWeek;
+      switch (event.startTime.getDay()) {
+        case 0: { dayOfWeek = CalendarApp.Weekday.SUNDAY; break; }
+        case 1: { dayOfWeek = CalendarApp.Weekday.MONDAY; break; }
+        case 2: { dayOfWeek = CalendarApp.Weekday.TUESDAY; break; }
+        case 3: { dayOfWeek = CalendarApp.Weekday.WEDNESDAY; break; }
+        case 4: { dayOfWeek = CalendarApp.Weekday.THURSDAY; break; }
+        case 5: { dayOfWeek = CalendarApp.Weekday.FRIDAY; break; }
+        case 5: { dayOfWeek = CalendarApp.Weekday.SATURDAY; break; }
+        default:
+          break;
+      }
+      if (event.recurrence.end.toLowerCase() === "endafter") {
+        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek).times(event.recurrence.endTimes);
+      }
+      else if (event.recurrence.end.toLowerCase() === "endon") {
+        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek).until(new Date(event.recurrence.endDate.year, event.recurrence.endDate.month-1, event.recurrence.endDate.day));
+      }
+      else {
+        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek);
+      }
+    } 
+  }
+  else {
+    if (event.recurrence.end.toLowerCase() === "endafter") {
+      recurRule = CalendarApp.newRecurrence().addYearlyRule().interval(event.recurrence.repeatTimes).times(event.recurrence.endTimes);
+    }
+    else if (event.recurrence.end.toLowerCase() === "endon") {
+      recurRule = CalendarApp.newRecurrence().addYearlyRule().interval(event.recurrence.repeatTimes).until(new Date(event.recurrence.endDate.year, event.recurrence.endDate.month-1, event.recurrence.endDate.day));
+    }
+    else {
+      recurRule = CalendarApp.newRecurrence().addYearlyRule().interval(event.recurrence.repeatTimes);
+    }
+  }
+  return recurRule;
+}
+
+/**
+ * Helper function that find the header row in spreadsheet, which is defined by a specific background color.
+ */
+function getHeaderRow_(sheet) {
+  let headerRow;
+  for (let i = 1; i < sheet.getLastRow(); i++) {
+    let r = sheet.getRange(i.toString() + ":" + i.toString());
+    if (r.getBackground() === headerColor) {
+      headerRow = i;
+      break;
+    }
+  }
+  if (typeof(headerRow) === "undefined") {
+    throw new Error(`Error: Invalid sheet format.\nUnable to find header row. Please use ${headerColor} as the background color of your header.`);
+  }
+  return headerRow;
+}
+
+/**
+ * Helper function that find the column index that contain all the important infomation. 
+ * Note that it does not return column index in A1 notation. Use lettersFromIndex(index) to convert it.
+ * @returns {Object} Object that holds all the index. 
+ */
+function getInfoColumn_(sheet, headerRow) {
+
+  let dateCol;
+  let timeCol;
+  let recurCol;
+  let titlesCol = [];
+  let idsCol = [];
+  let headerData = sheet.getRange(headerRow.toString() + ":" + headerRow.toString()).getValues();
+  for (let i = 0; i < headerData[0].length; i++) {
+    if (headerData[0][i] === headerString.date) { dateCol = i; }
+    else if (headerData[0][i] === headerString.time) { timeCol = i; }
+    else if (headerData[0][i] === headerString.recurrence) { recurCol = i; }
+    else {
+      let contFlag = false;
+      for (let j = 0; j < headerString.titles.length; j++) {
+        if (headerData[0][i] === headerString.titles[j]) { 
+          titlesCol[j] = i; 
+          contFlag = true; 
+          break; 
+        }
+      }
+      if (contFlag) { continue; }
+      for (let j = 0; j < headerString.ids.length; j++) {
+        if (headerData[0][i] === headerString.ids[j]) { 
+          idsCol[j] = i; 
+          break; 
+        }
+      }
+    }
+  }
+  titlesCol = fillArrayWithNull(titlesCol, headerString.titles.length);
+  idsCol = fillArrayWithNull(idsCol, headerString.ids.length);
+  if (
+    typeof(dateCol) === "undefined" || 
+    typeof(timeCol) === "undefined" || 
+    typeof(recurCol) === "undefined" || 
+    titlesCol.length !== headerString.titles.length || titlesCol.includes("null") ||
+    idsCol.length !== headerString.ids.length || idsCol.includes("null")
+  ) {
+    let errMsg = "";
+    if (typeof(dateCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString.date} in header.\n` }
+    if (typeof(timeCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString.time} in header.\n` }
+    if (typeof(recurCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString.recurrence} in header.\n` }
+    if (titlesCol.includes("null")) {
+      for (let i = 0; i < titlesCol.length; i++) {
+        if (titlesCol[i] === "null") { errMsg = errMsg + `Unable to find ${headerString.titles[i]} in header.\n` }
+      }
+    }
+    if (idsCol.includes("null")) {
+      for (let i = 0; i < idsCol.length; i++) {
+        if (idsCol[i] === "null") { errMsg = errMsg + `Unable to find ${headerString.ids[i]} in header.\n` }
+      }
+    }
+    throw new Error(`Error: Invalid sheet format.\n${errMsg}`);
+  }
+
+  return {
+    'date': dateCol,
+    'time': timeCol,
+    'recurrence': recurCol,
+    'titles': titlesCol,
+    'ids': idsCol
+  }
+
+  function fillArrayWithNull(arr, length) {
+    if (length < arr.length) {
+      throw new Error(`Invalid parameter in fillArrayWithEmptyStr function. "length" parameter must be greater than the length of "arr"`);
+    }
+    let newArr = [];
+    for (let i = 0; i < length; i++) {
+      if (arr[i]) { newArr[i] = arr[i]; }
+      else { newArr[i] = "null"; }
+    }
+    return newArr;
+  }
+
+}
+
+/**
+ * Helper function that check whether two array are similar or not.
+ * @param {[]} arr1 - First array.
+ * @param {[]} arr2 - Second array.
+ * @returns {bool} True if both of the array's element are completely similar. Otherwise false.
+ */
+function arrayIsEqual_(arr1, arr2) {
+  if (arr1.length !== arr2.length) { return false; }
+  for (let i = 0; i < arr1.length; i++) {
+    if (arr1[i] !== arr2[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Helper function that convert index to column of A1 notation.
+ * @param {number} index - Index that need to be converted.
+ * @param {string} curResult - (Optional) Recursive result.
+ * @param {number} i - (Optional) Times to perform recursive.
+ * @returns {string} The A1 notation of the given index. Eg: 1 -> A, 25 -> Y, 32 -> AF, 9007199254740991 -> BKTXHSOGHKKE
+ */
+function lettersFromIndex_(index, curResult, i) {
+
+  if (i == undefined) i = 11; //enough for Number.MAX_SAFE_INTEGER
+  if (curResult == undefined) curResult = "";
+
+  var factor = Math.floor(index / Math.pow(26, i)); //for the order of magnitude 26^i
+
+  if (factor > 0 && i > 0) {
+    curResult += String.fromCharCode(64 + factor);
+    curResult = lettersFromIndex_(index - Math.pow(26, i) * factor, curResult, i - 1);
+
+  } else if (factor == 0 && i > 0) {
+    curResult = lettersFromIndex_(index, curResult, i - 1);
+
+  } else {
+    curResult += String.fromCharCode(64 + index % 26);
+
+  }
+  return curResult;
+}
