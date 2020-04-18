@@ -80,28 +80,28 @@ event = {
 
 //  Recurrent Format:
 //
-//  "Re:every3Day EndOn:20200414"
+//  "Re:every3Day EndOn:20200414" //
 //  Re:everyNUMDay EndOn:DATE
 //  - NUM: any number
 //  - DATE: 20200414
 //
 //  "Re:every1Day EndAfter:10times"
-//  Re:everyNUMDay EndAfter:NUMtimes
+//  Re:everyNUMDay EndAfter:NUMtimes //
 //  - NUM: any number
 //
-//  "Re:every1Week On:[Mon,Tues,Wed] EndOn:20200414"
+//  "Re:every1Week On:[Mon,Tues,Wed] EndOn:20200414" //
 //  Re:everyNUMWeek On:[WEEK] EndOn:DATE
 //  - NUM: any number
 //  - WEEK: Mon, Tues, Wed, Thurs, Fri, Sat, Sun
 //  - DATE: 20200414
 //
-//  "Re:every1Week On:[Mon,Tues,Wed] EndAfter:5times"
+//  "Re:every1Week On:[Mon,Tues,Wed] EndAfter:5times" //
 //  Re:everyNUMWeek On:[WEEK] EndAfter:NUMtimes
 //  - NUM: any number
 //  - WEEK: Mon, Tues, Wed, Thurs, Fri, Sat, Sun
 //  - DATE: 20200414
 //
-//  "Re:every2Month With:Date EndOn:20200414"
+//  "Re:every2Month With:Date EndOn:20200414" //
 //  Re:everyNUMMonth With:OPT EndOn:DATE
 //  - NUM: any number
 //  - OPT: Date, Week
@@ -116,7 +116,7 @@ event = {
 //      Date -> repeat every 2 month on the start start.
 //      Week -> repeat every 2 month on the same day of week.
 //
-//  "Re:every1Year EndOn:20200414"
+//  "Re:every1Year EndOn:20200414" 
 //  Re:everyNUMYear EndOn:DATE
 //  - NUM: any number
 //  - DATE: 20200414

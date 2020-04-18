@@ -41,7 +41,16 @@ function onOpen() {
     .addItem('Sync To', 'syncTo')
     .addItem('Sync From', 'syncFrom')
     .addItem('Clear All', 'clearAll')
+    .addItem('test', 'test')
     .addToUi();
+}
+
+function test() {
+  let msg = [];
+  for (let i = 0; i < 100; i++) {
+    msg.push(lettersFromIndex_(i));
+  }
+  SpreadsheetApp.getUi().alert(msg.join(', '));
 }
 
 /**
@@ -99,14 +108,11 @@ function syncTo() {
             formRecurrenceRule_(event),
             {'description': event.description}
           ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
-          createdEvents.push({
-            "id": event.id,
-            "title": event.title,
-            "description": event.description,
-            "startTime": event.startTime,
-            "endTime": event.endTime,
-            "recurrence": event.recurrence
-          });
+          let sT = new Date(event.startTime.getTime() - (5 * 60 * 1000));
+          let eT = new Date(event.endTime.getTime() + (5 * 60 * 1000));
+          let searchStr = event.title.split(" - ")[1].split(" ")[0];
+          let firstE = calendar.getEvents(sT, eT, {'search': searchStr});
+          createdEvents.push(calanderToEvent_(firstE[0]));
         }
       }
       else if (event.belong === "calendar") {
@@ -156,7 +162,31 @@ function syncTo() {
             event.recurrence.repeatMode !== eSeriesObj.recurrence.repeatMode ||
             !arrayIsEqual_(event.recurrence.repeatOn, eSeriesObj.recurrence.repeatOn)
           ) {
-            calEventSeries.setRecurrence(formRecurrenceRule_(event), event.startTime, event.endTime);
+
+            // Supposingly we should use this line of code to update it. 
+            // But seems like it cannot properly delete the old event when we tried to update its start date. 
+            // So use back the delete then create method.
+            // This line put here as a referrence. If future this issue has been fixed by google. This should be the preferred method,
+            // because we actually have limits on creating events, and i believe update will always be faster than delete and create.
+
+            // calEventSeries.setRecurrence(formRecurrenceRule_(event), event.startTime, event.endTime);
+            
+            calEventSeries.deleteEventSeries();
+            deletedEvents.push(event);
+
+            let createdE = calendar.createEventSeries(
+              event.title,
+              event.startTime,
+              event.endTime,
+              formRecurrenceRule_(event),
+              {'description': event.description}
+            ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
+            let sT = new Date(event.startTime.getTime() - (5 * 60 * 1000));
+            let eT = new Date(event.endTime.getTime() + (5 * 60 * 1000));
+            let searchStr = event.title.split(" - ")[1].split(" ")[0];
+            let firstE = calendar.getEvents(sT, eT, {'search': searchStr});
+            createdEvents.push(calanderToEvent_(firstE[0]));
+
           }
         }
       }
@@ -184,14 +214,11 @@ function syncTo() {
           formRecurrenceRule_(event),
           {'description': event.description}
         ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
-        createdEvents.push({
-          "id": event.id,
-          "title": event.title,
-          "description": event.description,
-          "startTime": event.startTime,
-          "endTime": event.endTime,
-          "recurrence": event.recurrence
-        });
+        let sT = new Date(event.startTime.getTime() - (5 * 60 * 1000));
+        let eT = new Date(event.endTime.getTime() + (5 * 60 * 1000));
+        let searchStr = event.title.split(" - ")[1].split(" ")[0];
+        let firstE = calendar.getEvents(sT, eT, {'search': searchStr});
+        createdEvents.push(calanderToEvent_(firstE[0]));
       }
     }
 
@@ -217,7 +244,7 @@ function syncTo() {
       for (let j = 0; j < infoCol.ids.length; j++) {
         for (const event of deletedEvents) {
           if (data[i][infoCol.ids[j]] === event.id) {
-            let cellA1Notation = lettersFromIndex_(infoCol.ids[j]+1) + i.toString();
+            let cellA1Notation = lettersFromIndex_(infoCol.ids[j]) + (i+headerRow+1).toString();
             let cell = sheet.getRange(cellA1Notation);
             cell.clearContent();
             break;
@@ -255,8 +282,9 @@ function syncTo() {
           ) {
             // Find the column of title. 
             let titleCol;
+            let t = event.title.split(" - ")[1];
             for (let j = 0; j < data[i].length; j++) {
-              if (data[i][j] === event.title) {
+              if (data[i][j] === t) {
                 titleCol = j;
               }
             }
@@ -269,7 +297,7 @@ function syncTo() {
             }
             // Add the event id to the id column.
             let idCol = infoCol.ids[idx];
-            let cellA1Notation = lettersFromIndex_(idCol+1) + i.toString();
+            let cellA1Notation = lettersFromIndex_(idCol) + (i+headerRow+1).toString();
             let cell = sheet.getRange(cellA1Notation);
             cell.setValue(event.id);
           }
@@ -342,6 +370,7 @@ function clearAll() {
 
   try {
 
+    let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
     let calendar = CalendarApp.getCalendarById(calendarID);
 
     // Show a prompt if cannot find the sheet/calendar
@@ -351,8 +380,8 @@ function clearAll() {
       throw new Error(promptMsg);
     }
 
+    // Get all the event and delete them.
     let events = getCalenderEvents_(calendar);
-
     for (const event of events) {
       if (event.recurrence === "null") {
         let calEvent = calendar.getEventById(event.id);
@@ -364,6 +393,12 @@ function clearAll() {
         calEventSeries.deleteEventSeries();
       }
     }
+
+    // Erase all everything in the CalendarEventID column(s).
+    let headerRow = getHeaderRow_(sheet); // Find the header.
+    let infoCol = getInfoColumn_(sheet, headerRow); // Find the CalendarEventID column.
+    let dataA1Notation = lettersFromIndex_(infoCol.ids[0]) + (headerRow+1).toString() + ":" + lettersFromIndex_(infoCol.ids[infoCol.ids.length-1]);
+    sheet.getRange(dataA1Notation).clearContent();
 
     // show a dialog box to indicate clear has completed.
     SpreadsheetApp.getUi().alert(`Clear Complete.`);
@@ -674,7 +709,7 @@ function sheetRowToEvent_(rowOfData, infoCol) {
   let recurRegEx2_2 = /Mon|Tues|Wed|Thurs|Fri|Sat|Sun/gi;
   let recurRegEx3 = /With:(Date|Week)/i;
   let recurRegEx4 = /End(On:\d{8}|After:\d+times)/i;
-  let recurrence;
+  let recurrence = "null";
   let start = {};
   let end = {};
   let dateArr = date.split("-");
@@ -952,14 +987,18 @@ function formRecurrenceRule_(event) {
         default:
           break;
       }
+      let numbers = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31];
+      let dayOfMonth = event.startTime.getDate();
+      let mod = dayOfMonth % 7 - 1;
+      let good_days = numbers.slice(dayOfMonth - mod, dayOfMonth - mod + 7);
       if (event.recurrence.end.toLowerCase() === "endafter") {
-        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek).times(event.recurrence.endTimes);
+        recurRule = CalendarApp.newRecurrence().addWeeklyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek).onlyOnMonthDays(good_days).times(event.recurrence.endTimes);
       }
       else if (event.recurrence.end.toLowerCase() === "endon") {
-        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek).until(new Date(event.recurrence.endDate.year, event.recurrence.endDate.month-1, event.recurrence.endDate.day));
+        recurRule = CalendarApp.newRecurrence().addWeeklyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek).onlyOnMonthDays(good_days).until(new Date(event.recurrence.endDate.year, event.recurrence.endDate.month-1, event.recurrence.endDate.day));
       }
       else {
-        recurRule = CalendarApp.newRecurrence().addMonthlyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek);
+        recurRule = CalendarApp.newRecurrence().addWeeklyRule().interval(event.recurrence.repeatTimes).onlyOnWeekday(dayOfWeek).onlyOnMonthDays(good_days);
       }
     } 
   }
@@ -1099,14 +1138,14 @@ function arrayIsEqual_(arr1, arr2) {
  * @param {number} index - Index that need to be converted.
  * @param {string} curResult - (Optional) Recursive result.
  * @param {number} i - (Optional) Times to perform recursive.
- * @returns {string} The A1 notation of the given index. Eg: 1 -> A, 25 -> Y, 32 -> AF, 9007199254740991 -> BKTXHSOGHKKE
+ * @returns {string} The A1 notation of the given index. Eg: 0 -> A, 24 -> Y, 31 -> AF, 9007199254740990 -> BKTXHSOGHKKE
  */
 function lettersFromIndex_(index, curResult, i) {
 
   if (i == undefined) i = 11; //enough for Number.MAX_SAFE_INTEGER
   if (curResult == undefined) curResult = "";
 
-  var factor = Math.floor(index / Math.pow(26, i)); //for the order of magnitude 26^i
+  let factor = Math.floor(index / Math.pow(26, i)); //for the order of magnitude 26^i
 
   if (factor > 0 && i > 0) {
     curResult += String.fromCharCode(64 + factor);
@@ -1116,7 +1155,7 @@ function lettersFromIndex_(index, curResult, i) {
     curResult = lettersFromIndex_(index, curResult, i - 1);
 
   } else {
-    curResult += String.fromCharCode(64 + index % 26);
+    curResult += String.fromCharCode(65 + index % 26);
 
   }
   return curResult;
