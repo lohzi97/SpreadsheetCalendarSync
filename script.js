@@ -29,6 +29,7 @@ var syncPeriod = {
   'yearBefore': 1,
   'yearAfter': 3
 }
+var syncMinutes = 15;
 
 /**
  * A special function that runs when the spreadsheet is first
@@ -36,156 +37,125 @@ var syncPeriod = {
  * items to the spreadsheet.
  */
 function onOpen() {
+
+  // Get the UI element to create menu.
   let ui = SpreadsheetApp.getUi();
+
+  // Check whether the auto sync trigger has been created.
+  let allTriggers = ScriptApp.getProjectTriggers();
+  if (allTriggers.length === 0) {
+    ui.createMenu('Sync Calendar')
+        .addItem('Setup', 'setup')
+        .addToUi();
+    return;
+  }
+  else {
+    for (const trigger of allTriggers) {
+      if (trigger.getHandlerFunction() !== "syncTo_") {
+        ui.createMenu('Sync Calendar')
+          .addItem('Setup', 'setup')
+          .addToUi();
+        return;
+      }
+    }
+  }
+
   ui.createMenu('Sync Calendar')
-    .addItem('Sync To', 'syncTo')
+    .addItem('Sync To', 'syncToWrapper')
     .addItem('Sync From', 'syncFrom')
     .addItem('Clear All', 'clearAll')
     .addToUi();
 }
 
 /**
- * Function that update the calendar with spreadsheet.
+ * Function that runs the action that need to be done when user first time use the script.
  */
-function syncTo() {
+function setup() {
+
+  // Create the auto sync trigger.
+  createTrigger_();
+
+  // Change the menu item.
+  let ui = SpreadsheetApp.getUi();
+  ui.createMenu('Sync Calendar')
+    .addItem('Sync To', 'syncToWrapper')
+    .addItem('Sync From', 'syncFrom')
+    .addItem('Clear All', 'clearAll')
+    .addToUi();
+
+  // Show a dialog box to indicate sync has completed.
+  SpreadsheetApp.getUi().alert(`Setup Complete.`);
+}
+
+/**
+ * Function that create the auto sync trigger. It will sync even if user has closed the spreadsheet.
+ */
+function createTrigger_() {
+  ScriptApp.newTrigger('syncTo_')
+    .timeBased()
+    .everyMinutes(syncMinutes)
+    .create();
+}
+
+/**
+ * Wrapper function that wrap up the syncTo function with try catch and add UI to it
+ */
+function syncToWrapper() {
+
   try {
 
-    // Get the sheet and calendar
-    let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
-    let calendar = CalendarApp.getCalendarById(calendarID);
-
-    // Show a prompt if cannot find the sheet/calendar
-    if (sheet === null || calendar === null) {
-      let promptMsg = "";
-      if (sheet === null) { promptMsg = promptMsg + `Unable to find ${sheetName} in ${spreadSheetURL}. \n`; }
-      if (calendar === null) { promptMsg = promptMsg + `Failed to get your calendar: ${calendarID}. \n` }
-      throw new Error(promptMsg);
-    }
+    // Run the syncTo function.
+    syncTo_();
     
-    // Get an array of event that defined in the sheet
-    let sheetEvents = getSheetEvents_(sheet);
+    // Show a dialog box to indicate sync has completed.
+    SpreadsheetApp.getUi().alert(`Sync Complete.`);
 
-    // Get an array of event that previously has set in calendar
-    let calendarEvents = getCalenderEvents_(calendar);
-    
-    // Compare sheetEvents and calendarEvents, extract those isn't exactly same.
-    let diffEvents = compareEvents_(sheetEvents, calendarEvents);
+  } catch (error) {
 
-    // From the diffEvents, perform the following to sync sheet to calendar:
-    // - create event if "belong" field is "sheet"
-    // - delete event if "belong" field is "calendar"
-    // - update event if "belong" field is "sheet&"
-    // - delete the event series and recreate an event if "belong" field is "sheet&DR"
-    // - delete the event and recreate an event series if "belong" field is "sheetAR"
-    let createdEvents = [];
-    let deletedEvents = [];
-    for (let i = 0; i < diffEvents.length; i++) {
-      let event = diffEvents[i];
-      if (event.belong === "sheet") {
-        if (event.recurrence === "null") {
-          let createdE = calendar.createEvent(
-            event.title,
-            event.startTime,
-            event.endTime,
-            {'description': event.description}
-          ).setTag('identification', `Created by "${identificationString}" spreadsheet.`);
-          createdEvents.push(calanderToEvent_(createdE));
-        }
-        else {
-          let createdE = calendar.createEventSeries(
-            event.title,
-            event.startTime,
-            event.endTime,
-            formRecurrenceRule_(event),
-            {'description': event.description}
-          ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
-          let sT = new Date(event.startTime.getTime() - (5 * 60 * 1000));
-          let eT = new Date(event.endTime.getTime() + (5 * 60 * 1000));
-          let searchStr = event.title.split(" - ")[1].split(" ")[0];
-          let firstE = calendar.getEvents(sT, eT, {'search': searchStr});
-          createdEvents.push(calanderToEvent_(firstE[0]));
-        }
-      }
-      else if (event.belong === "calendar") {
-        
-        // Find the event or event series and delete it.
-        if (event.recurrence === "null") {
-          let calEvent = calendar.getEventById(event.id);
-          calEvent.deleteEvent();
-        }
-        else {
-          let calEvent = calendar.getEventById(event.id);
-          let calEventSeries = calEvent.getEventSeries();
-          calEventSeries.deleteEventSeries();
-        }
-        deletedEvents.push(event);
+    SpreadsheetApp.getUi().alert(error);
 
-      }
-      else if (event.belong === "sheet&") {
-        if (event.recurrence === "null") {
-          let calEvent = calendar.getEventById(event.id);
-          let eObj = calanderToEvent_(calEvent);
-          if (event.title !== eObj.title) {
-            calEvent.setTitle(event.title);
-          }
-          if (event.startTime.getTime() !== eObj.startTime.getTime() || event.endTime.getTime() !== eObj.endTime.getTime()) {
-            calEvent.setTime(event.startTime, event.endTime);
-          }
-        }
-        else {
-          let calEvent = calendar.getEventById(event.id);
-          let calEventSeries = calEvent.getEventSeries();
-          let eSeriesObj = calanderToEvent_(calEvent);
-          if (event.title !== eSeriesObj.title) {
-            calEventSeries.setTitle(event.title);
-          }
-          if (
-            event.startTime.getTime() !== eSeriesObj.startTime.getTime() || 
-            event.endTime.getTime() !== eSeriesObj.endTime.getTime() ||
-            event.recurrence.rule !== eSeriesObj.recurrence.rule ||
-            event.recurrence.repeatTimes !== eSeriesObj.recurrence.repeatTimes ||
-            event.recurrence.end !== eSeriesObj.recurrence.end ||
-            event.recurrence.endTimes !== eSeriesObj.recurrence.endTimes ||
-            event.recurrence.endDate.year !== eSeriesObj.recurrence.endDate.year ||
-            event.recurrence.endDate.month !== eSeriesObj.recurrence.endDate.month ||
-            event.recurrence.endDate.day !== eSeriesObj.recurrence.endDate.day ||
-            event.recurrence.endTimes !== eSeriesObj.recurrence.endTimes ||
-            event.recurrence.repeatMode !== eSeriesObj.recurrence.repeatMode ||
-            !arrayIsEqual_(event.recurrence.repeatOn, eSeriesObj.recurrence.repeatOn)
-          ) {
+  }
 
-            // Supposingly we should use this line of code to update it. 
-            // But seems like it cannot properly delete the old event when we tried to update its start date. 
-            // So use back the delete then create method.
-            // This line put here as a referrence. If future this issue has been fixed by google. This should be the preferred method,
-            // because we actually have limits on creating events, and i believe update will always be faster than delete and create.
+}
 
-            // calEventSeries.setRecurrence(formRecurrenceRule_(event), event.startTime, event.endTime);
-            
-            calEventSeries.deleteEventSeries();
-            deletedEvents.push(event);
+/**
+ * Function that update the calendar with spreadsheet.
+ */
+function syncTo_() {
 
-            let createdE = calendar.createEventSeries(
-              event.title,
-              event.startTime,
-              event.endTime,
-              formRecurrenceRule_(event),
-              {'description': event.description}
-            ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
-            let sT = new Date(event.startTime.getTime() - (5 * 60 * 1000));
-            let eT = new Date(event.endTime.getTime() + (5 * 60 * 1000));
-            let searchStr = event.title.split(" - ")[1].split(" ")[0];
-            let firstE = calendar.getEvents(sT, eT, {'search': searchStr});
-            createdEvents.push(calanderToEvent_(firstE[0]));
+  // Get the sheet and calendar
+  let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
+  let calendar = CalendarApp.getCalendarById(calendarID);
 
-          }
-        }
-      }
-      else if (event.belong === "sheet&DR") {
-        let calEvent = calendar.getEventById(event.id);
-        let calEventSeries = calEvent.getEventSeries();
-        calEventSeries.deleteEventSeries();
-        deletedEvents.push(event);
+  // Show a prompt if cannot find the sheet/calendar
+  if (sheet === null || calendar === null) {
+    let promptMsg = "";
+    if (sheet === null) { promptMsg = promptMsg + `Unable to find ${sheetName} in ${spreadSheetURL}. \n`; }
+    if (calendar === null) { promptMsg = promptMsg + `Failed to get your calendar: ${calendarID}. \n` }
+    throw new Error(promptMsg);
+  }
+  
+  // Get an array of event that defined in the sheet
+  let sheetEvents = getSheetEvents_(sheet);
+
+  // Get an array of event that previously has set in calendar
+  let calendarEvents = getCalenderEvents_(calendar);
+  
+  // Compare sheetEvents and calendarEvents, extract those isn't exactly same.
+  let diffEvents = compareEvents_(sheetEvents, calendarEvents);
+
+  // From the diffEvents, perform the following to sync sheet to calendar:
+  // - create event if "belong" field is "sheet"
+  // - delete event if "belong" field is "calendar"
+  // - update event if "belong" field is "sheet&"
+  // - delete the event series and recreate an event if "belong" field is "sheet&DR"
+  // - delete the event and recreate an event series if "belong" field is "sheetAR"
+  let createdEvents = [];
+  let deletedEvents = [];
+  for (let i = 0; i < diffEvents.length; i++) {
+    let event = diffEvents[i];
+    if (event.belong === "sheet") {
+      if (event.recurrence === "null") {
         let createdE = calendar.createEvent(
           event.title,
           event.startTime,
@@ -194,10 +164,7 @@ function syncTo() {
         ).setTag('identification', `Created by "${identificationString}" spreadsheet.`);
         createdEvents.push(calanderToEvent_(createdE));
       }
-      else if (event.belong === "sheet&AR") {
-        let calEvent = calendar.getEventById(event.id);
-        calEvent.deleteEvent();
-        deletedEvents.push(event);
+      else {
         let createdE = calendar.createEventSeries(
           event.title,
           event.startTime,
@@ -212,98 +179,199 @@ function syncTo() {
         createdEvents.push(calanderToEvent_(firstE[0]));
       }
     }
-
-    // Begin modify the spreadsheet. It includes:
-    // - adding Calendar Event IDs
-    // - modify certain cell format if contradiction occur
-
-    // Find the header row, which is defined by a specific background color.
-    let headerRow = getHeaderRow_(sheet);
-
-    // Find the column that contain the info of the calendar events.
-    let infoCol = getInfoColumn_(sheet, headerRow);
-
-    // Get all the relevant data in the spreadsheet.
-    let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
-    let dataRange = sheet.getRange(dataA1Notation);
-    let data = dataRange.getValues();
-
-    // Loop through the data row by row, and check if that row requires edit or not.
-    for (let i = 0; i < data.length; i++) {
+    else if (event.belong === "calendar") {
       
-      // If the Event ID matched one of the deleted event's id, then delete the Event ID.
-      for (let j = 0; j < infoCol.ids.length; j++) {
-        for (const event of deletedEvents) {
-          if (data[i][infoCol.ids[j]] === event.id) {
-            let cellA1Notation = lettersFromIndex_(infoCol.ids[j]) + (i+headerRow+1).toString();
-            let cell = sheet.getRange(cellA1Notation);
-            cell.clearContent();
-            break;
-          } 
-        }
+      // Find the event or event series and delete it.
+      if (event.recurrence === "null") {
+        let calEvent = calendar.getEventById(event.id);
+        calEvent.deleteEvent();
       }
-
-      // If the title, startTime, endTime and recurrent of that row is same with one of the created event,
-      // add event.id to the Event ID column.
-      let eventFromRow = sheetRowToEvent_(data[i], infoCol, i);
-      for (const e of eventFromRow) {
-        for (const event of createdEvents) {
-          if (
-            (
-              e.title === event.title &&
-              e.startTime.getTime() === event.startTime.getTime() &&
-              e.endTime.getTime() === event.endTime.getTime() &&
-              e.recurrence === "null" && event.recurrence === "null"
-            ) 
-            ||
-            (
-              e.title === event.title &&
-              e.startTime.getTime() === event.startTime.getTime() &&
-              e.endTime.getTime() === event.endTime.getTime() &&
-              e.recurrence.rule === event.recurrence.rule &&
-              e.recurrence.repeatTimes === event.recurrence.repeatTimes &&
-              e.recurrence.end === event.recurrence.end &&
-              e.recurrence.endTimes === event.recurrence.endTimes &&
-              e.recurrence.endDate.year === event.recurrence.endDate.year &&
-              e.recurrence.endDate.month === event.recurrence.endDate.month &&
-              e.recurrence.endDate.day === event.recurrence.endDate.day &&
-              e.recurrence.repeatMode === event.recurrence.repeatMode &&
-              arrayIsEqual_(e.recurrence.repeatOn, event.recurrence.repeatOn)
-            )
-          ) {
-            // Find the column of title. 
-            let titleCol;
-            let t = event.title.split(" - ")[1];
-            for (let j = 0; j < data[i].length; j++) {
-              if (data[i][j] === t) {
-                titleCol = j;
-              }
-            }
-            // Check which index in headerString.titles that title is in.
-            let idx;
-            for (let j = 0; j < infoCol.titles.length; j++) {
-              if (infoCol.titles[j] === titleCol) {
-                idx = j;
-              }
-            }
-            // Add the event id to the id column.
-            let idCol = infoCol.ids[idx];
-            let cellA1Notation = lettersFromIndex_(idCol) + (i+headerRow+1).toString();
-            let cell = sheet.getRange(cellA1Notation);
-            cell.setValue(event.id);
-          }
-        }
+      else {
+        let calEvent = calendar.getEventById(event.id);
+        let calEventSeries = calEvent.getEventSeries();
+        calEventSeries.deleteEventSeries();
       }
+      deletedEvents.push(event);
 
     }
+    else if (event.belong === "sheet&") {
+      if (event.recurrence === "null") {
+        let calEvent = calendar.getEventById(event.id);
+        let eObj = calanderToEvent_(calEvent);
+        if (event.title !== eObj.title) {
+          calEvent.setTitle(event.title);
+        }
+        if (event.startTime.getTime() !== eObj.startTime.getTime() || event.endTime.getTime() !== eObj.endTime.getTime()) {
+          calEvent.setTime(event.startTime, event.endTime);
+        }
+      }
+      else {
+        let calEvent = calendar.getEventById(event.id);
+        let calEventSeries = calEvent.getEventSeries();
+        let eSeriesObj = calanderToEvent_(calEvent);
+        if (event.title !== eSeriesObj.title) {
+          calEventSeries.setTitle(event.title);
+        }
+        if (
+          event.startTime.getTime() !== eSeriesObj.startTime.getTime() || 
+          event.endTime.getTime() !== eSeriesObj.endTime.getTime() ||
+          event.recurrence.rule !== eSeriesObj.recurrence.rule ||
+          event.recurrence.repeatTimes !== eSeriesObj.recurrence.repeatTimes ||
+          event.recurrence.end !== eSeriesObj.recurrence.end ||
+          event.recurrence.endTimes !== eSeriesObj.recurrence.endTimes ||
+          event.recurrence.endDate.year !== eSeriesObj.recurrence.endDate.year ||
+          event.recurrence.endDate.month !== eSeriesObj.recurrence.endDate.month ||
+          event.recurrence.endDate.day !== eSeriesObj.recurrence.endDate.day ||
+          event.recurrence.endTimes !== eSeriesObj.recurrence.endTimes ||
+          event.recurrence.repeatMode !== eSeriesObj.recurrence.repeatMode ||
+          !arrayIsEqual_(event.recurrence.repeatOn, eSeriesObj.recurrence.repeatOn)
+        ) {
 
-    // show a dialog box to indicate sync has completed.
-    SpreadsheetApp.getUi().alert(`Sync Complete.`);
-    
-  } catch (error) {
-    SpreadsheetApp.getUi().alert(error);
+          // Supposingly we should use this line of code to update it. 
+          // But seems like it cannot properly delete the old event when we tried to update its start date. 
+          // So use back the delete then create method.
+          // This line put here as a referrence. If future this issue has been fixed by google. This should be the preferred method,
+          // because we actually have limits on creating events, and i believe update will always be faster than delete and create.
+
+          // calEventSeries.setRecurrence(formRecurrenceRule_(event), event.startTime, event.endTime);
+          
+          calEventSeries.deleteEventSeries();
+          deletedEvents.push(event);
+
+          let createdE = calendar.createEventSeries(
+            event.title,
+            event.startTime,
+            event.endTime,
+            formRecurrenceRule_(event),
+            {'description': event.description}
+          ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
+          let sT = new Date(event.startTime.getTime() - (5 * 60 * 1000));
+          let eT = new Date(event.endTime.getTime() + (5 * 60 * 1000));
+          let searchStr = event.title.split(" - ")[1].split(" ")[0];
+          let firstE = calendar.getEvents(sT, eT, {'search': searchStr});
+          createdEvents.push(calanderToEvent_(firstE[0]));
+
+        }
+      }
+    }
+    else if (event.belong === "sheet&DR") {
+      let calEvent = calendar.getEventById(event.id);
+      let calEventSeries = calEvent.getEventSeries();
+      calEventSeries.deleteEventSeries();
+      deletedEvents.push(event);
+      let createdE = calendar.createEvent(
+        event.title,
+        event.startTime,
+        event.endTime,
+        {'description': event.description}
+      ).setTag('identification', `Created by "${identificationString}" spreadsheet.`);
+      createdEvents.push(calanderToEvent_(createdE));
+    }
+    else if (event.belong === "sheet&AR") {
+      let calEvent = calendar.getEventById(event.id);
+      calEvent.deleteEvent();
+      deletedEvents.push(event);
+      let createdE = calendar.createEventSeries(
+        event.title,
+        event.startTime,
+        event.endTime,
+        formRecurrenceRule_(event),
+        {'description': event.description}
+      ).setTag('identification', `Created by "${identificationString}" spreadsheet.`).setTag('recurrence', JSON.stringify(event.recurrence));
+      let sT = new Date(event.startTime.getTime() - (5 * 60 * 1000));
+      let eT = new Date(event.endTime.getTime() + (5 * 60 * 1000));
+      let searchStr = event.title.split(" - ")[1].split(" ")[0];
+      let firstE = calendar.getEvents(sT, eT, {'search': searchStr});
+      createdEvents.push(calanderToEvent_(firstE[0]));
+    }
   }
+
+  // Begin modify the spreadsheet. It includes:
+  // - adding Calendar Event IDs
+  // - modify certain cell format if contradiction occur
+
+  // Find the header row, which is defined by a specific background color.
+  let headerRow = getHeaderRow_(sheet);
+
+  // Find the column that contain the info of the calendar events.
+  let infoCol = getInfoColumn_(sheet, headerRow);
+
+  // Get all the relevant data in the spreadsheet.
+  let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
+  let dataRange = sheet.getRange(dataA1Notation);
+  let data = dataRange.getValues();
+
+  // Loop through the data row by row, and check if that row requires edit or not.
+  for (let i = 0; i < data.length; i++) {
+    
+    // If the Event ID matched one of the deleted event's id, then delete the Event ID.
+    for (let j = 0; j < infoCol.ids.length; j++) {
+      for (const event of deletedEvents) {
+        if (data[i][infoCol.ids[j]] === event.id) {
+          let cellA1Notation = lettersFromIndex_(infoCol.ids[j]) + (i+headerRow+1).toString();
+          let cell = sheet.getRange(cellA1Notation);
+          cell.clearContent();
+          break;
+        } 
+      }
+    }
+
+    // If the title, startTime, endTime and recurrent of that row is same with one of the created event,
+    // add event.id to the Event ID column.
+    let eventFromRow = sheetRowToEvent_(data[i], infoCol, i);
+    for (const e of eventFromRow) {
+      for (const event of createdEvents) {
+        if (
+          (
+            e.title === event.title &&
+            e.startTime.getTime() === event.startTime.getTime() &&
+            e.endTime.getTime() === event.endTime.getTime() &&
+            e.recurrence === "null" && event.recurrence === "null"
+          ) 
+          ||
+          (
+            e.title === event.title &&
+            e.startTime.getTime() === event.startTime.getTime() &&
+            e.endTime.getTime() === event.endTime.getTime() &&
+            e.recurrence.rule === event.recurrence.rule &&
+            e.recurrence.repeatTimes === event.recurrence.repeatTimes &&
+            e.recurrence.end === event.recurrence.end &&
+            e.recurrence.endTimes === event.recurrence.endTimes &&
+            e.recurrence.endDate.year === event.recurrence.endDate.year &&
+            e.recurrence.endDate.month === event.recurrence.endDate.month &&
+            e.recurrence.endDate.day === event.recurrence.endDate.day &&
+            e.recurrence.repeatMode === event.recurrence.repeatMode &&
+            arrayIsEqual_(e.recurrence.repeatOn, event.recurrence.repeatOn)
+          )
+        ) {
+          // Find the column of title. 
+          let titleCol;
+          let t = event.title.split(" - ")[1];
+          for (let j = 0; j < data[i].length; j++) {
+            if (data[i][j] === t) {
+              titleCol = j;
+            }
+          }
+          // Check which index in headerString.titles that title is in.
+          let idx;
+          for (let j = 0; j < infoCol.titles.length; j++) {
+            if (infoCol.titles[j] === titleCol) {
+              idx = j;
+            }
+          }
+          // Add the event id to the id column.
+          let idCol = infoCol.ids[idx];
+          let cellA1Notation = lettersFromIndex_(idCol) + (i+headerRow+1).toString();
+          let cell = sheet.getRange(cellA1Notation);
+          cell.setValue(event.id);
+        }
+      }
+    }
+
+  }
+
   return;
+  
 }
 
 /**
@@ -311,6 +379,14 @@ function syncTo() {
  */
 function syncFrom() {
   try {
+
+    // Show prompt to user indicating that this will clear everything, and ask them to confirm on continue.
+    let ui = SpreadsheetApp.getUi();
+    let response = ui.alert('WARNING! \nSync From calendar will overwrite certain portion of your sheet. \nAre you sure you want to continue?', ui.ButtonSet.YES_NO);
+
+    if (response === ui.Button.NO) {
+      return;
+    }
 
     // Get the sheet and calendar
     let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
@@ -437,6 +513,14 @@ function clearAll() {
 
   try {
 
+    // Show prompt to user indicating that this will clear everything, and ask them to confirm on continue.
+    let ui = SpreadsheetApp.getUi();
+    let response = ui.alert('WARNING! IRREVERSIBLE ACTION! \nThis will delete all the auto generated event and clear the EventID columns content. \nAre you sure you want to continue?', ui.ButtonSet.YES_NO);
+
+    if (response === ui.Button.NO) {
+      return;
+    }
+
     let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
     let calendar = CalendarApp.getCalendarById(calendarID);
 
@@ -468,10 +552,10 @@ function clearAll() {
     sheet.getRange(dataA1Notation).clearContent();
 
     // show a dialog box to indicate clear has completed.
-    SpreadsheetApp.getUi().alert(`Clear Complete.`);
+    ui.alert(`Clear Complete.`);
 
   } catch (error) {
-    SpreadsheetApp.getUi().alert(error);
+    ui.alert(error);
   }
   return;
 }
