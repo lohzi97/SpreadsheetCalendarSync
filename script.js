@@ -16,7 +16,7 @@ var sheetName = "Sheet1";
 var calendarID = "ttj425k3bbo0ktrns2tsvq8ln8@group.calendar.google.com";
 var headerColor = "#4a86e8";
 var noSyncString = "NOSYNC";
-var headerString ={
+var headerString = {
   'date': "Date",
   'time': "Time",
   'recurrence': "Recurrence",
@@ -41,16 +41,7 @@ function onOpen() {
     .addItem('Sync To', 'syncTo')
     .addItem('Sync From', 'syncFrom')
     .addItem('Clear All', 'clearAll')
-    .addItem('test', 'test')
     .addToUi();
-}
-
-function test() {
-  let msg = [];
-  for (let i = 0; i < 100; i++) {
-    msg.push(lettersFromIndex_(i));
-  }
-  SpreadsheetApp.getUi().alert(msg.join(', '));
 }
 
 /**
@@ -254,7 +245,7 @@ function syncTo() {
 
       // If the title, startTime, endTime and recurrent of that row is same with one of the created event,
       // add event.id to the Event ID column.
-      let eventFromRow = sheetRowToEvent_(data[i], infoCol);
+      let eventFromRow = sheetRowToEvent_(data[i], infoCol, i);
       for (const e of eventFromRow) {
         for (const event of createdEvents) {
           if (
@@ -342,14 +333,90 @@ function syncFrom() {
     // Compare sheetEvents and calendarEvents, extract those isn't exactly same.
     let diffEvents = compareEvents_(sheetEvents, calendarEvents);
 
+    // Find the header row, which is defined by a specific background color.
+    let headerRow = getHeaderRow_(sheet);
+
+    // Find the column that contain the info of the calendar events.
+    let infoCol = getInfoColumn_(sheet, headerRow);
+
     // From the diffEvents, perform the following to sync calendar to sheet:
     // - create a new row and add info to it if "belong" field is "calendar"
     // - add noSyncString to title if "belong" field is "sheet"
     // - update the row info if "belong" field is "calendar&", "calendar&AR" "calendar&DR"
-    for (let i = 0; i < diffEvents.length; i++) {
-      let event = diffEvents[i];
+    for (let z = 0; z < diffEvents.length; z++) {
+      
+      let event = diffEvents[z];
+      
       if (event.belong === "calendar") {
-        
+
+        // Convert the event object into a spreadsheet row. 
+        let rowOfEvent = eventToSheetRow_(event, infoCol);
+
+        // Append it to the end of the spreadsheet.
+        sheet.appendRow(rowOfEvent);
+
+      }
+      else if (event.belong === "sheet") {
+
+        // Find the index that we need to use to set the Title and EventID.
+        let splitedTitle = event.title.split(" - ");
+        if (splitedTitle.length > 2) {
+          splitedTitle[1] = splitedTitle.slice(1).join(' - ');
+        }
+        let idx = headerString.prefix.indexOf(splitedTitle[0]);
+
+        // Find the row that the event is in, by looping through all the data and comparing the event title. We does not compare
+        // all the info because the generated rowOfEvent may be a bit different than the original one. But still use title because
+        // it is the least modified one. 
+        let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
+        let data = sheet.getRange(dataA1Notation).getValues();
+        for (let i = 0; i < data.length; i++) {
+          if (data[i][infoCol.titles[idx]] === splitedTitle[1]) {
+
+            // Add the noSyncString in front of the title.
+            let cellA1Notation = lettersFromIndex_(infoCol.titles[idx]) + (i+headerRow+1).toString();
+            let cell = sheet.getRange(cellA1Notation);
+            let cellValue = cell.getValue()
+            cell.setValue(noSyncString + " " + cellValue);
+            break;
+
+          }
+        }
+
+      }
+      else if (
+        event.belong === "calendar&" ||
+        event.belong === "calendar&AR" ||
+        event.belong === "calendar&DR"
+      ) {
+
+        // Convert the event object into a spreadsheet row. 
+        let rowOfEvent = eventToSheetRow_(event, infoCol);
+
+        // Find the index that we need to use to set the Title and EventID.
+        let splitedTitle = event.title.split(" - ");
+        if (splitedTitle.length > 2) {
+          splitedTitle[1] = splitedTitle.slice(1).join(' - ')
+        }
+        let idx = headerString.prefix.indexOf(splitedTitle[0]);
+
+        // Find the row that the event is in, by looping through all the data and comparing the event id.
+        let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
+        let data = sheet.getRange(dataA1Notation).getValues();
+        for (let i = 0; i < data.length; i++) {
+          if (data[i][infoCol.ids[idx]] === event.id) {
+
+            // Replace everything in the row with the generated rowOfEvent content.
+            for (let j = 0; j < rowOfEvent.length; j++) {
+              if (rowOfEvent[j] !== "") {
+                let cellA1Notation = lettersFromIndex_(j) + (i+headerRow+1).toString();
+                let cell = sheet.getRange(cellA1Notation);
+                cell.setValue(rowOfEvent[j]);   
+              }
+            }
+          }
+        }
+
       }
     }
 
@@ -437,7 +504,7 @@ function getSheetEvents_(sheet) {
       continue;
     }
 
-    let formedEvents = sheetRowToEvent_(data[i], infoCol);
+    let formedEvents = sheetRowToEvent_(data[i], infoCol, i);
     events = events.concat(formedEvents);
 
   }
@@ -686,7 +753,7 @@ function compareEvents_(sheetEvents, calendarEvents) {
  * Helper function that take a whole row of into the event obejct that is used throughout this script.
  */
 var selfGenID = 0;
-function sheetRowToEvent_(rowOfData, infoCol) {
+function sheetRowToEvent_(rowOfData, infoCol, rowNumber) {
 
   let formedEvents = [];
 
@@ -718,11 +785,11 @@ function sheetRowToEvent_(rowOfData, infoCol) {
 
   // Process date.
   if (dateArr.length > 2) {
-    throw new Error(`Error: Invalid date format.\nMore than 1 hyphen detected in date coloum of row ${i}, counted from header.`);
+    throw new Error(`Error: Invalid date format.\nMore than 1 hyphen detected in date coloum of row ${rowNumber+1}, counted from header.`);
   }
   for (const d of dateArr) {
     if (!dateRegEx.test(d)) {
-      throw new Error(`Error: Invalid date format.\nDate should be in YYYYMMDD format. Eg: 20200401. Error found in date column of row ${i}, counted from header.`);
+      throw new Error(`Error: Invalid date format.\nDate should be in YYYYMMDD format. Eg: 20200401. Error found in date column of row ${rowNumber+1}, counted from header.`);
     }
   }
   start.year = parseInt(dateArr[0].slice(0,4));
@@ -741,11 +808,11 @@ function sheetRowToEvent_(rowOfData, infoCol) {
 
   // Process time.
   if (timeArr.length > 2) {
-    throw new Error(`Error: Invalid time format.\nMore than 1 hyphen detected in time coloum of row ${i}, counted from header.`);
+    throw new Error(`Error: Invalid time format.\nMore than 1 hyphen detected in time coloum of row ${rowNumber+1}, counted from header.`);
   }
   for (const t of timeArr) {
     if (!timeRegEx.test(t)) {
-      throw new Error(`Error: Invalid time format.\nTime should be in 24 Hour format. Eg: 0800. Error found in date column of row ${i}, counted from header.`);
+      throw new Error(`Error: Invalid time format.\nTime should be in 24 Hour format. Eg: 0800. Error found in date column of row ${rowNumber+1}, counted from header.`);
     }
   }
   start.hours = parseInt(timeArr[0].slice(0,2));
@@ -778,29 +845,29 @@ function sheetRowToEvent_(rowOfData, infoCol) {
       'repeatOn': ["null"]
     };
     if (recurArr.length > 3) {
-      throw new Error(`Error: Invalid recurrence format.\nMore than 3 section detected in recurrence coloum of row ${i}, counted from header.`);
+      throw new Error(`Error: Invalid recurrence format.\nMore than 3 section detected in recurrence coloum of row ${rowNumber+1}, counted from header.`);
     }
     if (!recurRegEx1.test(recurArr[0])) {
-      throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format. Error found in recurrence column of row ${i}, counted from header.`);
+      throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format. Error found in recurrence column of row ${rowNumber+1}, counted from header.`);
     }
     let recurRuleIdx = recurArr[0].search(/Day|Week|Month|Year/i);
     recurrence.rule = recurArr[0].slice(recurRuleIdx).toLowerCase();
     recurrence.repeatTimes = parseInt(recurArr[0].slice(8, recurRuleIdx));
     if (recurrence.rule === "week") {
       if (!recurRegEx2_1.test(recurArr[1])) {
-        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence week. Error found in recurrence column of row ${i}, counted from header.`);
+        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence week. Error found in recurrence column of row ${rowNumber+1}, counted from header.`);
       }
       recurrence.repeatOn = recurArr[1].match(recurRegEx2_2);
       if (recurrence.repeatOn === null) {
-        throw new Error(`Error: Invalid recurrence format.\nUnable to identify which day(s) of the week to repeat. Error found in recurrence column of row ${i}, counted from header.`);
+        throw new Error(`Error: Invalid recurrence format.\nUnable to identify which day(s) of the week to repeat. Error found in recurrence column of row ${rowNumber+1}, counted from header.`);
       }
       if (recurArr.length === 3) {
         if (!recurRegEx4.test(recurArr[2])) {
-          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence week. Error found in recurrence column of row ${i}, counted from header.`);
+          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence week. Error found in recurrence column of row ${rowNumber+1}, counted from header.`);
         }
         let tempArr = recurArr[2].split(':');
         recurrence.end = tempArr[0];
-        if (tempArr[0] === "EndAfter") {
+        if (tempArr[0].toLowerCase() === "endafter") {
           recurrence.endTimes = parseInt(tempArr[1].slice(0,-5));
         }
         else {
@@ -816,16 +883,16 @@ function sheetRowToEvent_(rowOfData, infoCol) {
     }
     else if (recurrence.rule === "month") {
       if (!recurRegEx3.test(recurArr[1])) {
-        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence month. Error found in recurrence column of row ${i}, counted from header.`);
+        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence month. Error found in recurrence column of row ${rowNumber+1}, counted from header.`);
       }
       recurrence.repeatMode = recurArr[1].slice(5);
       if (recurArr.length === 3) {
         if (!recurRegEx4.test(recurArr[2])) {
-          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence month. Error found in recurrence column of row ${i}, counted from header.`);
+          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence month. Error found in recurrence column of row ${rowNumber+1}, counted from header.`);
         }
         let tempArr = recurArr[2].split(':');
         recurrence.end = tempArr[0];
-        if (tempArr[0] === "EndAfter") {
+        if (tempArr[0].toLowerCase() === "endafter") {
           recurrence.endTimes = parseInt(tempArr[1].slice(0,-5));
         }
         else {
@@ -841,15 +908,15 @@ function sheetRowToEvent_(rowOfData, infoCol) {
     }
     else {
       if (recurArr.length === 3) {
-        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence day/year. Error found in recurrence column of row ${i}, counted from header.`);
+        throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence day/year. Error found in recurrence column of row ${rowNumber+1}, counted from header.`);
       }
       else if (recurArr.length === 2) {
         if (!recurRegEx4.test(recurArr[1])) {
-          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence day/year. Error found in recurrence column of row ${i}, counted from header.`);
+          throw new Error(`Error: Invalid recurrence format.\nPlease follow the predefined format for recurrence day/year. Error found in recurrence column of row ${rowNumber+1}, counted from header.`);
         }
         let tempArr = recurArr[1].split(':');
         recurrence.end = tempArr[0];
-        if (tempArr[0] === "EndAfter") {
+        if (tempArr[0].toLowerCase() === "endafter") {
           recurrence.endTimes = parseInt(tempArr[1].slice(0,-5));
         }
         else {
@@ -1023,7 +1090,7 @@ function getHeaderRow_(sheet) {
   let headerRow;
   for (let i = 1; i < sheet.getLastRow(); i++) {
     let r = sheet.getRange(i.toString() + ":" + i.toString());
-    if (r.getBackground() === headerColor) {
+    if (r.getBackground() === headerColor) {  
       headerRow = i;
       break;
     }
@@ -1116,6 +1183,106 @@ function getInfoColumn_(sheet, headerRow) {
   }
 
 }
+
+/**
+ * Helper function that convert event object into an array that can be directly appended to the end of the spreadsheet.
+ */
+function eventToSheetRow_(event, infoCol) {
+
+  let sheetRow = [];
+
+  // Find the index that we need to use to set the Title and EventID.
+  let splitedTitle = event.title.split(" - ");
+  if (splitedTitle.length > 2) {
+    splitedTitle[1] = splitedTitle.slice(1).join(' - ')
+  }
+  let idx = headerString.prefix.indexOf(splitedTitle[0]);
+
+  // Convert the event object into spreadsheet cell value. 
+  let title = splitedTitle[1];
+  let id = event.id;
+  let date = "";
+  let time = "";
+  let recurrence = "";
+
+  // Make this start and end object to make everything easier to read.
+  let start = {
+    'year': event.startTime.getFullYear(),
+    'month': event.startTime.getMonth() + 1,
+    'day': event.startTime.getDate(),
+    'hours': event.startTime.getHours(),
+    'minutes': event.startTime.getMinutes()
+  }
+  let end = {
+    'year': event.endTime.getFullYear(),
+    'month': event.endTime.getMonth() + 1,
+    'day': event.endTime.getDate(),
+    'hours': event.endTime.getHours(),
+    'minutes': event.endTime.getMinutes()
+  }
+  
+  // Form the date value.
+  date = start.year.toString().padStart(4,"0") + start.month.toString().padStart(2,"0") + start.day.toString().padStart(2,"0");
+  if (
+    start.year !== end.year ||
+    start.month !== end.month ||
+    start.day !== end.day
+  ) {
+    date = date + "-" + end.year.toString().padStart(4,"0") + end.month.toString().padStart(2,"0") + end.day.toString().padStart(2,"0");
+  }
+
+  // Form the time value.
+  time = start.hours.toString().padStart(2,"0") + start.minutes.toString().padStart(2,"0");
+  if (
+    start.hours !== end.hours - 1 ||
+    start.minutes !== end.minutes
+  ) {
+    time = time + "-" + end.hours.toString().padStart(2,"0") + end.minutes.toString().padStart(2,"0");
+  }
+
+  // Form the recurrence value, if required.
+  if (event.recurrence !== "null") {
+    recurrence = "Re:every" + event.recurrence.repeatTimes.toString() + capitalizeFirstLetter(event.recurrence.rule);
+    if (event.recurrence.rule === "week") {
+      recurrence = recurrence + " On:[" + event.recurrence.repeatOn.join(',') + "]";
+    }
+    else if (event.recurrence.rule === "month") {
+      recurrence = recurrence + " With:" + event.recurrence.repeatMode;
+    }
+    if (event.recurrence.end.toLowerCase() === "endafter") {
+      recurrence = recurrence + " " + event.recurrence.end + ":" + event.recurrence.endTimes + "times"
+    }
+    else {
+      recurrence = recurrence + " " + event.recurrence.end + ":" + event.recurrence.endDate.year.toString().padStart(4,"0") + event.recurrence.endDate.month.toString().padStart(2,"0") + event.recurrence.endDate.day.toString().padStart(2,"0");
+    }
+  }
+
+  // Put everything into the sheetRow array.
+  sheetRow[infoCol.ids[idx]] = id;
+  sheetRow[infoCol.titles[idx]] = title;
+  sheetRow[infoCol.date] = date;
+  sheetRow[infoCol.time] = time;
+  sheetRow[infoCol.recurrence] = recurrence;
+
+  // fill all the undefined section with empty string.
+  for (let i = 0; i < sheetRow.length; i++) {
+    if (typeof(sheetRow[i]) === "undefined") {
+      sheetRow[i] = "";
+    }
+  }
+
+  return sheetRow;
+
+  /**
+   * Helper function that capitalize the first letter for the whole string. 
+   * @param {string} str String that want to be capitalized.
+   * @returns Original string but with the first letter capitalized. Eg: "day" -> "Day", "day of week" -> "Day of week"
+   */
+  function capitalizeFirstLetter(str) {
+    return str.charAt(0).toUpperCase() + str.substring(1);
+  }
+
+} 
 
 /**
  * Helper function that check whether two array are similar or not.
