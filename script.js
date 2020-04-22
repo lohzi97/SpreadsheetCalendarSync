@@ -12,18 +12,28 @@
  * - All these need to be defined by user.
  */
 var spreadSheetURL = "https://docs.google.com/spreadsheets/d/1XdYDfoyke-NvJOv9T_4iK6hq3pWtUu74-Sl5WJ7dHZs/edit#gid=0";
-var sheetName = "Sheet1";
+var sheetNames = ["Sheet1", "Sheet2"];
 var calendarID = "ttj425k3bbo0ktrns2tsvq8ln8@group.calendar.google.com";
 var headerColor = "#4a86e8";
 var noSyncString = "NOSYNC";
-var headerString = {
-  'date': "Date",
-  'time': "Time",
-  'recurrence': "Recurrence",
-  'titles': ["Title", "Facebook Post 1"],
-  'ids': ['CalendarEventID - Blog', 'CalendarEventID - FB'],
-  'prefix': ["Blog", "FB"]
-}
+var headerString = [
+  {
+    'date': "Date",
+    'time': "Time",
+    'recurrence': "Recurrence",
+    'titles': ["Blog Title", "FB Post Title 1"],
+    'ids': ['CalendarEventID - Blog', 'CalendarEventID - FB'],
+    'prefix': ["Blog", "FB"]
+  },
+  {
+    'date': "D",
+    'time': "T",
+    'recurrence': "Re",
+    'titles': ["Articles", "Stories"],
+    'ids': ['CalendarEventID - Arti', 'CalendarEventID - Sto'],
+    'prefix': ["Ar", "St"]
+  }
+]
 var identificationString = "Calendar Sync";
 var syncPeriod = {
   'yearBefore': 1,
@@ -45,15 +55,23 @@ function onOpen() {
   let allTriggers = ScriptApp.getProjectTriggers();
   if (allTriggers.length === 0) {
     ui.createMenu('Sync Calendar')
-        .addItem('Setup', 'setup')
-        .addToUi();
+      .addItem('Sync To', 'syncToWrapper')
+      .addItem('Sync From', 'syncFrom')
+      .addSeparator()
+      .addItem('Clear All', 'clearAll')
+      .addItem('Enable Auto Sync', 'enableTrigger')
+      .addToUi();
     return;
   }
   else {
     for (const trigger of allTriggers) {
       if (trigger.getHandlerFunction() !== "syncTo_") {
         ui.createMenu('Sync Calendar')
-          .addItem('Setup', 'setup')
+          .addItem('Sync To', 'syncToWrapper')
+          .addItem('Sync From', 'syncFrom')
+          .addSeparator()
+          .addItem('Clear All', 'clearAll')
+          .addItem('Enable Auto Sync', 'enableTrigger')
           .addToUi();
         return;
       }
@@ -63,28 +81,11 @@ function onOpen() {
   ui.createMenu('Sync Calendar')
     .addItem('Sync To', 'syncToWrapper')
     .addItem('Sync From', 'syncFrom')
+    .addSeparator()
     .addItem('Clear All', 'clearAll')
+    .addItem('Disable Auto Sync', 'deleteTrigger')
     .addToUi();
-}
-
-/**
- * Function that runs the action that need to be done when user first time use the script.
- */
-function setup() {
-
-  // Create the auto sync trigger.
-  createTrigger_();
-
-  // Change the menu item.
-  let ui = SpreadsheetApp.getUi();
-  ui.createMenu('Sync Calendar')
-    .addItem('Sync To', 'syncToWrapper')
-    .addItem('Sync From', 'syncFrom')
-    .addItem('Clear All', 'clearAll')
-    .addToUi();
-
-  // Show a dialog box to indicate sync has completed.
-  SpreadsheetApp.getUi().alert(`Setup Complete.`);
+    
 }
 
 /**
@@ -95,6 +96,65 @@ function createTrigger_() {
     .timeBased()
     .everyMinutes(syncMinutes)
     .create();
+}
+
+/**
+ * Function that deletes the auto sync trigger.
+ */
+function deleteTrigger() {
+
+  // Loop through all the available trigger
+  let allTriggers = ScriptApp.getProjectTriggers();
+  for (const trigger of allTriggers) {
+    if (trigger.getHandlerFunction() === "syncTo_") {
+
+      // delete the trigger.
+      ScriptApp.deleteTrigger(trigger);
+
+      // update the menu
+      let ui = SpreadsheetApp.getUi();
+      ui.createMenu('Sync Calendar')
+        .addItem('Sync To', 'syncToWrapper')
+        .addItem('Sync From', 'syncFrom')
+        .addSeparator()
+        .addItem('Clear All', 'clearAll')
+        .addItem('Enable Auto Sync', 'enableTrigger')
+        .addToUi();
+
+      // Show a dialog box to indicate auto sync disabled.
+      SpreadsheetApp.getUi().alert(`Auto sync disabled.`);
+
+      return;
+
+    }
+  }
+
+}
+
+function enableTrigger() {
+  try {
+
+    // Create the auto sync trigger.
+    createTrigger_();
+
+    // Update the menu
+    let ui = SpreadsheetApp.getUi();
+    ui.createMenu('Sync Calendar')
+      .addItem('Sync To', 'syncToWrapper')
+      .addItem('Sync From', 'syncFrom')
+      .addSeparator()
+      .addItem('Clear All', 'clearAll')
+      .addItem('Disable Auto Sync', 'deleteTrigger')
+      .addToUi();
+
+    // Show a dialog box to indicate auto sync enabled.
+    SpreadsheetApp.getUi().alert(`Auto sync enabled.`);
+
+  } catch (error) {
+    
+    SpreadsheetApp.getUi().alert(error);
+
+  }
 }
 
 /**
@@ -123,24 +183,31 @@ function syncToWrapper() {
  */
 function syncTo_() {
 
-  // Get the sheet and calendar
-  let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
+  // Get the calendar
   let calendar = CalendarApp.getCalendarById(calendarID);
-
-  // Show a prompt if cannot find the sheet/calendar
-  if (sheet === null || calendar === null) {
-    let promptMsg = "";
-    if (sheet === null) { promptMsg = promptMsg + `Unable to find ${sheetName} in ${spreadSheetURL}. \n`; }
-    if (calendar === null) { promptMsg = promptMsg + `Failed to get your calendar: ${calendarID}. \n` }
-    throw new Error(promptMsg);
+  if (calendar === null) {
+    throw new Error(`Failed to get your calendar: ${calendarID}.`);
   }
-  
-  // Get an array of event that defined in the sheet
-  let sheetEvents = getSheetEvents_(sheet);
 
   // Get an array of event that previously has set in calendar
   let calendarEvents = getCalenderEvents_(calendar);
   
+  // Get an array of event that defined in all the sheets.
+  let sheetEvents = [];
+  for (let s = 0; s < sheetNames.length; s++) {
+   
+    // Get the sheet
+    let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetNames[s]);
+    if (sheet === null) {
+      throw new Error(`Unable to find ${sheetName} in ${spreadSheetURL}.`);
+    }
+    
+    // Get an array of event that defined in the sheet
+    let eventArray = getSheetEvents_(sheet, s);
+    sheetEvents = sheetEvents.concat(eventArray);
+
+  }
+    
   // Compare sheetEvents and calendarEvents, extract those isn't exactly same.
   let diffEvents = compareEvents_(sheetEvents, calendarEvents);
 
@@ -288,88 +355,99 @@ function syncTo_() {
 
   // Begin modify the spreadsheet. It includes:
   // - adding Calendar Event IDs
-  // - modify certain cell format if contradiction occur
+  for (let s = 0; s < sheetNames.length; s++) {
 
-  // Find the header row, which is defined by a specific background color.
-  let headerRow = getHeaderRow_(sheet);
+    // Get the sheet
+    let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetNames[s]);
 
-  // Find the column that contain the info of the calendar events.
-  let infoCol = getInfoColumn_(sheet, headerRow);
+    // Find the header row, which is defined by a specific background color.
+    let headerRow = getHeaderRow_(sheet);
 
-  // Get all the relevant data in the spreadsheet.
-  let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
-  let dataRange = sheet.getRange(dataA1Notation);
-  let data = dataRange.getValues();
+    // Find the column that contain the info of the calendar events.
+    let infoCol = getInfoColumn_(sheet, s, headerRow);
 
-  // Loop through the data row by row, and check if that row requires edit or not.
-  for (let i = 0; i < data.length; i++) {
-    
-    // If the Event ID matched one of the deleted event's id, then delete the Event ID.
-    for (let j = 0; j < infoCol.ids.length; j++) {
-      for (const event of deletedEvents) {
-        if (data[i][infoCol.ids[j]] === event.id) {
-          let cellA1Notation = lettersFromIndex_(infoCol.ids[j]) + (i+headerRow+1).toString();
-          let cell = sheet.getRange(cellA1Notation);
-          cell.clearContent();
-          break;
-        } 
-      }
-    }
+    // Get all the relevant data in the spreadsheet.
+    let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
+    let dataRange = sheet.getRange(dataA1Notation);
+    let data = dataRange.getValues();
 
-    // If the title, startTime, endTime and recurrent of that row is same with one of the created event,
-    // add event.id to the Event ID column.
-    let eventFromRow = sheetRowToEvent_(data[i], infoCol, i);
-    for (const e of eventFromRow) {
-      for (const event of createdEvents) {
-        if (
-          (
-            e.title === event.title &&
-            e.startTime.getTime() === event.startTime.getTime() &&
-            e.endTime.getTime() === event.endTime.getTime() &&
-            e.recurrence === "null" && event.recurrence === "null"
-          ) 
-          ||
-          (
-            e.title === event.title &&
-            e.startTime.getTime() === event.startTime.getTime() &&
-            e.endTime.getTime() === event.endTime.getTime() &&
-            e.recurrence.rule === event.recurrence.rule &&
-            e.recurrence.repeatTimes === event.recurrence.repeatTimes &&
-            e.recurrence.end === event.recurrence.end &&
-            e.recurrence.endTimes === event.recurrence.endTimes &&
-            e.recurrence.endDate.year === event.recurrence.endDate.year &&
-            e.recurrence.endDate.month === event.recurrence.endDate.month &&
-            e.recurrence.endDate.day === event.recurrence.endDate.day &&
-            e.recurrence.repeatMode === event.recurrence.repeatMode &&
-            arrayIsEqual_(e.recurrence.repeatOn, event.recurrence.repeatOn)
-          )
-        ) {
-          // Find the column of title. 
-          let titleCol;
-          let t = event.title.split(" - ")[1];
-          for (let j = 0; j < data[i].length; j++) {
-            if (data[i][j] === t) {
-              titleCol = j;
-            }
-          }
-          // Check which index in headerString.titles that title is in.
-          let idx;
-          for (let j = 0; j < infoCol.titles.length; j++) {
-            if (infoCol.titles[j] === titleCol) {
-              idx = j;
-            }
-          }
-          // Add the event id to the id column.
-          let idCol = infoCol.ids[idx];
-          let cellA1Notation = lettersFromIndex_(idCol) + (i+headerRow+1).toString();
-          let cell = sheet.getRange(cellA1Notation);
-          cell.setValue(event.id);
+    // Loop through the data row by row, and check if that row requires edit or not.
+    for (let i = 0; i < data.length; i++) {
+      
+      // If the Event ID matched one of the deleted event's id, then delete the Event ID.
+      for (let j = 0; j < infoCol.ids.length; j++) {
+        for (const event of deletedEvents) {
+          if (data[i][infoCol.ids[j]] === event.id) {
+            let cellA1Notation = lettersFromIndex_(infoCol.ids[j]) + (i+headerRow+1).toString();
+            let cell = sheet.getRange(cellA1Notation);
+            cell.clearContent();
+            break;
+          } 
         }
       }
+
+      // If the title, startTime, endTime and recurrent of that row is same with one of the created event,
+      // add event.id to the Event ID column.
+      let eventFromRow = sheetRowToEvent_(data[i], infoCol, i, s);
+      for (const e of eventFromRow) {
+        for (const event of createdEvents) {
+          if (
+            (
+              e.title === event.title &&
+              e.startTime.getTime() === event.startTime.getTime() &&
+              e.endTime.getTime() === event.endTime.getTime() &&
+              e.recurrence === "null" && event.recurrence === "null"
+            ) 
+            ||
+            (
+              e.title === event.title &&
+              e.startTime.getTime() === event.startTime.getTime() &&
+              e.endTime.getTime() === event.endTime.getTime() &&
+              e.recurrence.rule === event.recurrence.rule &&
+              e.recurrence.repeatTimes === event.recurrence.repeatTimes &&
+              e.recurrence.end === event.recurrence.end &&
+              e.recurrence.endTimes === event.recurrence.endTimes &&
+              e.recurrence.endDate.year === event.recurrence.endDate.year &&
+              e.recurrence.endDate.month === event.recurrence.endDate.month &&
+              e.recurrence.endDate.day === event.recurrence.endDate.day &&
+              e.recurrence.repeatMode === event.recurrence.repeatMode &&
+              arrayIsEqual_(e.recurrence.repeatOn, event.recurrence.repeatOn)
+            )
+          ) {
+            // Find the column of title. 
+            let titleCol;
+            let splitedTitle = event.title.split(" - ");
+            if (splitedTitle.length > 2) {
+              splitedTitle[1] = splitedTitle.slice(1).join(' - ')
+            }
+            for (let j = 0; j < data[i].length; j++) {
+              if (data[i][j] === splitedTitle[1]) {
+                titleCol = j;
+              }
+            }
+            // Check which index in headerString.titles that title is in.
+            let idx;
+            for (let j = 0; j < infoCol.titles.length; j++) {
+              if (infoCol.titles[j] === titleCol) {
+                idx = j;
+              }
+            }
+            // Add the event id to the id column.
+            let idCol = infoCol.ids[idx];
+            let cellA1Notation = lettersFromIndex_(idCol) + (i+headerRow+1).toString();
+            let cell = sheet.getRange(cellA1Notation);
+            cell.setValue(event.id);
+            
+          }
+        }
+      }
+
     }
 
-  }
+    protectIDColumn_(sheet, headerRow, infoCol);
 
+  }
+  
   return;
   
 }
@@ -378,124 +456,147 @@ function syncTo_() {
  * Function that update the spreadsheet with calendar.
  */
 function syncFrom() {
+  
+  // Show prompt to user indicating that this will clear everything, and ask them to confirm on continue.
+  let ui = SpreadsheetApp.getUi();
+  let response = ui.alert('WARNING! \nSync From calendar will overwrite certain portion of your sheet. \nAre you sure you want to continue?', ui.ButtonSet.YES_NO);
+
+  if (response === ui.Button.NO) {
+    return;
+  }
+
   try {
 
-    // Show prompt to user indicating that this will clear everything, and ask them to confirm on continue.
-    let ui = SpreadsheetApp.getUi();
-    let response = ui.alert('WARNING! \nSync From calendar will overwrite certain portion of your sheet. \nAre you sure you want to continue?', ui.ButtonSet.YES_NO);
-
-    if (response === ui.Button.NO) {
-      return;
-    }
-
-    // Get the sheet and calendar
-    let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
+    // Get the calendar
     let calendar = CalendarApp.getCalendarById(calendarID);
-    
-    // Show a prompt if cannot find the sheet/calendar
-    if (sheet === null || calendar === null) {
-      let promptMsg = "";
-      if (sheet === null) { promptMsg = promptMsg + `Unable to find ${sheetName} in ${spreadSheetURL}. \n`; }
-      if (calendar === null) { promptMsg = promptMsg + `Failed to get your calendar: ${calendarID}. \n` }
-      throw new Error(promptMsg);
+    if (calendar === null) {
+      throw new Error(`Failed to get your calendar: ${calendarID}.`);
     }
-
-    // Get an array of event that defined in the sheet
-    let sheetEvents = getSheetEvents_(sheet);
 
     // Get an array of event that previously has set in calendar
     let calendarEvents = getCalenderEvents_(calendar);
-    
+
+    // Get an array of event that defined in the sheets.
+    let sheetEvents = [];
+    for (let s = 0; s < sheetNames.length; s++) {
+     
+      // Get the sheet
+      let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetNames[s]);
+      if (sheet === null) {
+        throw new Error(`Unable to find ${sheetName} in ${spreadSheetURL}.`);
+      }
+
+      // Get an array of event that defined in the sheet
+      let eventArray = getSheetEvents_(sheet, s);
+      sheetEvents = sheetEvents.concat(eventArray);
+
+    }
+
     // Compare sheetEvents and calendarEvents, extract those isn't exactly same.
     let diffEvents = compareEvents_(sheetEvents, calendarEvents);
 
-    // Find the header row, which is defined by a specific background color.
-    let headerRow = getHeaderRow_(sheet);
+    for (let s = 0; s < sheetNames.length; s++) {
 
-    // Find the column that contain the info of the calendar events.
-    let infoCol = getInfoColumn_(sheet, headerRow);
+      // Get the sheet
+      let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetNames[s]);
 
-    // From the diffEvents, perform the following to sync calendar to sheet:
-    // - create a new row and add info to it if "belong" field is "calendar"
-    // - add noSyncString to title if "belong" field is "sheet"
-    // - update the row info if "belong" field is "calendar&", "calendar&AR" "calendar&DR"
-    for (let z = 0; z < diffEvents.length; z++) {
-      
-      let event = diffEvents[z];
-      
-      if (event.belong === "calendar") {
+      // Find the header row, which is defined by a specific background color.
+      let headerRow = getHeaderRow_(sheet);
 
-        // Convert the event object into a spreadsheet row. 
-        let rowOfEvent = eventToSheetRow_(event, infoCol);
+      // Find the column that contain the info of the calendar events.
+      let infoCol = getInfoColumn_(sheet, s, headerRow);
 
-        // Append it to the end of the spreadsheet.
-        sheet.appendRow(rowOfEvent);
+      // From the diffEvents, perform the following to sync calendar to sheet:
+      // - create a new row and add info to it if "belong" field is "calendar"
+      // - add noSyncString to title if "belong" field is "sheet"
+      // - update the row info if "belong" field is "calendar&", "calendar&AR" "calendar&DR"
+      for (let z = 0; z < diffEvents.length; z++) {
+        
+        let event = diffEvents[z];
+        
+        if (event.belong === "calendar") {
 
-      }
-      else if (event.belong === "sheet") {
+          // Convert the event object into a spreadsheet row. 
+          let rowOfEvent = eventToSheetRow_(event, infoCol, s);
 
-        // Find the index that we need to use to set the Title and EventID.
-        let splitedTitle = event.title.split(" - ");
-        if (splitedTitle.length > 2) {
-          splitedTitle[1] = splitedTitle.slice(1).join(' - ');
-        }
-        let idx = headerString.prefix.indexOf(splitedTitle[0]);
-
-        // Find the row that the event is in, by looping through all the data and comparing the event title. We does not compare
-        // all the info because the generated rowOfEvent may be a bit different than the original one. But still use title because
-        // it is the least modified one. 
-        let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
-        let data = sheet.getRange(dataA1Notation).getValues();
-        for (let i = 0; i < data.length; i++) {
-          if (data[i][infoCol.titles[idx]] === splitedTitle[1]) {
-
-            // Add the noSyncString in front of the title.
-            let cellA1Notation = lettersFromIndex_(infoCol.titles[idx]) + (i+headerRow+1).toString();
-            let cell = sheet.getRange(cellA1Notation);
-            let cellValue = cell.getValue()
-            cell.setValue(noSyncString + " " + cellValue);
-            break;
-
+          // Check if the title column is empty. If it is empty, means that this is not the sheet that it should append to.
+          // Skip it.
+          if (titlesIsEmpty(rowOfEvent, infoCol)) {
+            continue;
           }
+
+          // Append it to the end of the spreadsheet.
+          sheet.appendRow(rowOfEvent);
+
         }
+        else if (event.belong === "sheet") {
 
-      }
-      else if (
-        event.belong === "calendar&" ||
-        event.belong === "calendar&AR" ||
-        event.belong === "calendar&DR"
-      ) {
+          // Find the index that we need to use to set the Title and EventID.
+          let splitedTitle = event.title.split(" - ");
+          if (splitedTitle.length > 2) {
+            splitedTitle[1] = splitedTitle.slice(1).join(' - ');
+          }
+          let idx = headerString[s].prefix.indexOf(splitedTitle[0]);
 
-        // Convert the event object into a spreadsheet row. 
-        let rowOfEvent = eventToSheetRow_(event, infoCol);
+          // Find the row that the event is in, by looping through all the data and comparing the event title. We does not compare
+          // all the info because the generated rowOfEvent may be a bit different than the original one. But still use title because
+          // it is the least modified one. 
+          let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
+          let data = sheet.getRange(dataA1Notation).getValues();
+          for (let i = 0; i < data.length; i++) {
+            if (data[i][infoCol.titles[idx]] === splitedTitle[1]) {
 
-        // Find the index that we need to use to set the Title and EventID.
-        let splitedTitle = event.title.split(" - ");
-        if (splitedTitle.length > 2) {
-          splitedTitle[1] = splitedTitle.slice(1).join(' - ')
+              // Add the noSyncString in front of the title.
+              let cellA1Notation = lettersFromIndex_(infoCol.titles[idx]) + (i+headerRow+1).toString();
+              let cell = sheet.getRange(cellA1Notation);
+              let cellValue = cell.getValue()
+              cell.setValue(noSyncString + " " + cellValue);
+              break;
+
+            }
+          }
+
         }
-        let idx = headerString.prefix.indexOf(splitedTitle[0]);
+        else if (
+          event.belong === "calendar&" ||
+          event.belong === "calendar&AR" ||
+          event.belong === "calendar&DR"
+        ) {
 
-        // Find the row that the event is in, by looping through all the data and comparing the event id.
-        let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
-        let data = sheet.getRange(dataA1Notation).getValues();
-        for (let i = 0; i < data.length; i++) {
-          if (data[i][infoCol.ids[idx]] === event.id) {
+          // Convert the event object into a spreadsheet row. 
+          let rowOfEvent = eventToSheetRow_(event, infoCol, s);
 
-            // Replace everything in the row with the generated rowOfEvent content.
-            for (let j = 0; j < rowOfEvent.length; j++) {
-              if (rowOfEvent[j] !== "") {
-                let cellA1Notation = lettersFromIndex_(j) + (i+headerRow+1).toString();
-                let cell = sheet.getRange(cellA1Notation);
-                cell.setValue(rowOfEvent[j]);   
+          // Find the index that we need to use to set the Title and EventID.
+          let splitedTitle = event.title.split(" - ");
+          if (splitedTitle.length > 2) {
+            splitedTitle[1] = splitedTitle.slice(1).join(' - ')
+          }
+          let idx = headerString[s].prefix.indexOf(splitedTitle[0]);
+
+          // Find the row that the event is in, by looping through all the data and comparing the event id.
+          let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
+          let data = sheet.getRange(dataA1Notation).getValues();
+          for (let i = 0; i < data.length; i++) {
+            if (data[i][infoCol.ids[idx]] === event.id) {
+
+              // Replace everything in the row with the generated rowOfEvent content.
+              for (let j = 0; j < rowOfEvent.length; j++) {
+                if (rowOfEvent[j] !== "") {
+                  let cellA1Notation = lettersFromIndex_(j) + (i+headerRow+1).toString();
+                  let cell = sheet.getRange(cellA1Notation);
+                  cell.setValue(rowOfEvent[j]);   
+                }
               }
             }
           }
+
         }
-
       }
-    }
 
+      protectIDColumn_(sheet, headerRow, infoCol);
+
+    }
+    
     // show a dialog box to indicate sync has completed.
     SpreadsheetApp.getUi().alert(`Sync Complete.`);
     
@@ -503,6 +604,18 @@ function syncFrom() {
     SpreadsheetApp.getUi().alert(error);
   }
   return;
+
+  function titlesIsEmpty(rowOfEvent, infoCol) {
+
+    for (const titleCol of infoCol.titles) {
+      if (rowOfEvent[titleCol]) {
+        return false;
+      }
+    }
+    return true;
+
+  }
+
 }
 
 /**
@@ -511,24 +624,20 @@ function syncFrom() {
  */
 function clearAll() {
 
+  // Show prompt to user indicating that this will clear everything, and ask them to confirm on continue.
+  let ui = SpreadsheetApp.getUi();
+  let response = ui.alert('WARNING! IRREVERSIBLE ACTION! \nThis will delete all the auto generated event and clear the EventID columns content in all defined sheets. \nAre you sure you want to continue?', ui.ButtonSet.YES_NO);
+
+  if (response === ui.Button.NO) {
+    return;
+  }
+
   try {
 
-    // Show prompt to user indicating that this will clear everything, and ask them to confirm on continue.
-    let ui = SpreadsheetApp.getUi();
-    let response = ui.alert('WARNING! IRREVERSIBLE ACTION! \nThis will delete all the auto generated event and clear the EventID columns content. \nAre you sure you want to continue?', ui.ButtonSet.YES_NO);
-
-    if (response === ui.Button.NO) {
-      return;
-    }
-
-    let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetName);
+    // Get the calendar
     let calendar = CalendarApp.getCalendarById(calendarID);
-
-    // Show a prompt if cannot find the sheet/calendar
     if (calendar === null) {
-      let promptMsg = "";
-      if (calendar === null) { promptMsg = promptMsg + `Failed to get your calendar: ${calendarID}. \n` }
-      throw new Error(promptMsg);
+      throw new Error(`Failed to get your calendar: ${calendarID}.`);
     }
 
     // Get all the event and delete them.
@@ -545,11 +654,21 @@ function clearAll() {
       }
     }
 
-    // Erase all everything in the CalendarEventID column(s).
-    let headerRow = getHeaderRow_(sheet); // Find the header.
-    let infoCol = getInfoColumn_(sheet, headerRow); // Find the CalendarEventID column.
-    let dataA1Notation = lettersFromIndex_(infoCol.ids[0]) + (headerRow+1).toString() + ":" + lettersFromIndex_(infoCol.ids[infoCol.ids.length-1]);
-    sheet.getRange(dataA1Notation).clearContent();
+    for (let s = 0; s < sheetNames.length; s++) {
+
+      // Get the sheet
+      let sheet = SpreadsheetApp.openByUrl(spreadSheetURL).getSheetByName(sheetNames[s]);
+      if (sheet === null) {
+        throw new Error(`Unable to find ${sheetName} in ${spreadSheetURL}.`);
+      }
+
+      // Erase all everything in the CalendarEventID column(s).
+      let headerRow = getHeaderRow_(sheet); // Find the header.
+      let infoCol = getInfoColumn_(sheet, s, headerRow); // Find the CalendarEventID column.
+      let dataA1Notation = lettersFromIndex_(infoCol.ids[0]) + (headerRow+1).toString() + ":" + lettersFromIndex_(infoCol.ids[infoCol.ids.length-1]);
+      sheet.getRange(dataA1Notation).clearContent();
+
+    }
 
     // show a dialog box to indicate clear has completed.
     ui.alert(`Clear Complete.`);
@@ -563,7 +682,7 @@ function clearAll() {
 /**
  * Helper function that capture all the event in spreadsheet.
  */
-function getSheetEvents_(sheet) {
+function getSheetEvents_(sheet, sheetIdx) {
   
   // Create an events array to store all the event.
   let events = [];
@@ -572,7 +691,7 @@ function getSheetEvents_(sheet) {
   let headerRow = getHeaderRow_(sheet);
 
   // Find the column that contain the info of the calendar events.
-  let infoCol = getInfoColumn_(sheet, headerRow);
+  let infoCol = getInfoColumn_(sheet, sheetIdx, headerRow);
   
   // Get all the relevant data in the spreadsheet.
   let dataA1Notation = (headerRow+1).toString() + ":" + sheet.getLastRow().toString();
@@ -580,7 +699,6 @@ function getSheetEvents_(sheet) {
   
   // Loop through the all the data row by row.
   // If there is a valid event, make an object to push into events array.
-  selfGenID = 0;
   for (let i = 0; i < data.length; i++) {
 
     // Skip rows that does not have date, time and any title info.
@@ -588,7 +706,7 @@ function getSheetEvents_(sheet) {
       continue;
     }
 
-    let formedEvents = sheetRowToEvent_(data[i], infoCol, i);
+    let formedEvents = sheetRowToEvent_(data[i], infoCol, i, sheetIdx);
     events = events.concat(formedEvents);
 
   }
@@ -837,7 +955,7 @@ function compareEvents_(sheetEvents, calendarEvents) {
  * Helper function that take a whole row of into the event obejct that is used throughout this script.
  */
 var selfGenID = 0;
-function sheetRowToEvent_(rowOfData, infoCol, rowNumber) {
+function sheetRowToEvent_(rowOfData, infoCol, rowNumber, sheetIdx) {
 
   let formedEvents = [];
 
@@ -912,6 +1030,15 @@ function sheetRowToEvent_(rowOfData, infoCol, rowNumber) {
 
   let startTime = new Date(start.year, start.month-1, start.day, start.hours, start.minutes);
   let endTime = new Date(end.year, end.month-1, end.day, end.hours, end.minutes);
+
+  // Skip this event(s) if it is outside of the sync period.
+  let syncStartDate = new Date();
+  syncStartDate.setFullYear(syncStartDate.getFullYear() - syncPeriod.yearBefore);
+  let syncEndDate = new Date();
+  syncEndDate.setFullYear(syncEndDate.getFullYear() + syncPeriod.yearAfter);
+  if (endTime.getTime() < syncStartDate.getTime() || startTime.getTime() > syncEndDate.getTime()) {
+    return [];
+  } 
 
   // Process recurrence.
   if (recur !== "") {
@@ -1026,7 +1153,7 @@ function sheetRowToEvent_(rowOfData, infoCol, rowNumber) {
       continue;
     }
 
-    let eventTitle = headerString.prefix[i] + " - " + rowOfData[titlesCol[i]].slice(0,1000);
+    let eventTitle = headerString[sheetIdx].prefix[i] + " - " + rowOfData[titlesCol[i]].slice(0,1000);
     let eventID;
     if (rowOfData[idsCol[i]] !== "") { 
       eventID = rowOfData[idsCol[i]]; 
@@ -1190,7 +1317,7 @@ function getHeaderRow_(sheet) {
  * Note that it does not return column index in A1 notation. Use lettersFromIndex(index) to convert it.
  * @returns {Object} Object that holds all the index. 
  */
-function getInfoColumn_(sheet, headerRow) {
+function getInfoColumn_(sheet, sheetIdx, headerRow) {
 
   let dateCol;
   let timeCol;
@@ -1199,48 +1326,48 @@ function getInfoColumn_(sheet, headerRow) {
   let idsCol = [];
   let headerData = sheet.getRange(headerRow.toString() + ":" + headerRow.toString()).getValues();
   for (let i = 0; i < headerData[0].length; i++) {
-    if (headerData[0][i] === headerString.date) { dateCol = i; }
-    else if (headerData[0][i] === headerString.time) { timeCol = i; }
-    else if (headerData[0][i] === headerString.recurrence) { recurCol = i; }
+    if (headerData[0][i] === headerString[sheetIdx].date) { dateCol = i; }
+    else if (headerData[0][i] === headerString[sheetIdx].time) { timeCol = i; }
+    else if (headerData[0][i] === headerString[sheetIdx].recurrence) { recurCol = i; }
     else {
       let contFlag = false;
-      for (let j = 0; j < headerString.titles.length; j++) {
-        if (headerData[0][i] === headerString.titles[j]) { 
+      for (let j = 0; j < headerString[sheetIdx].titles.length; j++) {
+        if (headerData[0][i] === headerString[sheetIdx].titles[j]) { 
           titlesCol[j] = i; 
           contFlag = true; 
           break; 
         }
       }
       if (contFlag) { continue; }
-      for (let j = 0; j < headerString.ids.length; j++) {
-        if (headerData[0][i] === headerString.ids[j]) { 
+      for (let j = 0; j < headerString[sheetIdx].ids.length; j++) {
+        if (headerData[0][i] === headerString[sheetIdx].ids[j]) { 
           idsCol[j] = i; 
           break; 
         }
       }
     }
   }
-  titlesCol = fillArrayWithNull(titlesCol, headerString.titles.length);
-  idsCol = fillArrayWithNull(idsCol, headerString.ids.length);
+  titlesCol = fillArrayWithNull(titlesCol, headerString[sheetIdx].titles.length);
+  idsCol = fillArrayWithNull(idsCol, headerString[sheetIdx].ids.length);
   if (
     typeof(dateCol) === "undefined" || 
     typeof(timeCol) === "undefined" || 
     typeof(recurCol) === "undefined" || 
-    titlesCol.length !== headerString.titles.length || titlesCol.includes("null") ||
-    idsCol.length !== headerString.ids.length || idsCol.includes("null")
+    titlesCol.length !== headerString[sheetIdx].titles.length || titlesCol.includes("null") ||
+    idsCol.length !== headerString[sheetIdx].ids.length || idsCol.includes("null")
   ) {
     let errMsg = "";
-    if (typeof(dateCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString.date} in header.\n` }
-    if (typeof(timeCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString.time} in header.\n` }
-    if (typeof(recurCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString.recurrence} in header.\n` }
+    if (typeof(dateCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString[sheetIdx].date} in header of ${sheetNames[sheetIdx]}.\n` }
+    if (typeof(timeCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString[sheetIdx].time} in header of ${sheetNames[sheetIdx]}.\n` }
+    if (typeof(recurCol) === "undefined") { errMsg = errMsg + `Unable to find ${headerString[sheetIdx].recurrence} in header of ${sheetNames[sheetIdx]}.\n` }
     if (titlesCol.includes("null")) {
       for (let i = 0; i < titlesCol.length; i++) {
-        if (titlesCol[i] === "null") { errMsg = errMsg + `Unable to find ${headerString.titles[i]} in header.\n` }
+        if (titlesCol[i] === "null") { errMsg = errMsg + `Unable to find ${headerString[sheetIdx].titles[i]} in header of ${sheetNames[sheetIdx]}.\n` }
       }
     }
     if (idsCol.includes("null")) {
       for (let i = 0; i < idsCol.length; i++) {
-        if (idsCol[i] === "null") { errMsg = errMsg + `Unable to find ${headerString.ids[i]} in header.\n` }
+        if (idsCol[i] === "null") { errMsg = errMsg + `Unable to find ${headerString[sheetIdx].ids[i]} in header of ${sheetNames[sheetIdx]}.\n` }
       }
     }
     throw new Error(`Error: Invalid sheet format.\n${errMsg}`);
@@ -1271,7 +1398,7 @@ function getInfoColumn_(sheet, headerRow) {
 /**
  * Helper function that convert event object into an array that can be directly appended to the end of the spreadsheet.
  */
-function eventToSheetRow_(event, infoCol) {
+function eventToSheetRow_(event, infoCol, sheetIdx) {
 
   let sheetRow = [];
 
@@ -1280,7 +1407,7 @@ function eventToSheetRow_(event, infoCol) {
   if (splitedTitle.length > 2) {
     splitedTitle[1] = splitedTitle.slice(1).join(' - ')
   }
-  let idx = headerString.prefix.indexOf(splitedTitle[0]);
+  let idx = headerString[sheetIdx].prefix.indexOf(splitedTitle[0]);
 
   // Convert the event object into spreadsheet cell value. 
   let title = splitedTitle[1];
@@ -1367,6 +1494,21 @@ function eventToSheetRow_(event, infoCol) {
   }
 
 } 
+
+/**
+ * Helper function set the eventID column to be protected.
+ */
+function protectIDColumn_(sheet, headerRow, infoCol) {
+
+  for (const idCol of infoCol.ids) {
+    let A1Notation = lettersFromIndex_(idCol) + (headerRow+1).toString() + ":" + lettersFromIndex_(idCol);
+    let idRange = sheet.getRange(A1Notation);
+    idRange.protect().setWarningOnly(true);
+  }
+
+  return;
+
+}
 
 /**
  * Helper function that check whether two array are similar or not.

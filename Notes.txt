@@ -124,3 +124,33 @@ event = {
 //  "Re:every2Year EndAfter:3times"
 //  Re:everyNUMYear EndAfter:NUMtimes
 //  - NUM: any number
+
+Q1: for the facebook group thing. I should not simply invite ppl right?
+Q2: 
+
+https://web.whatsapp.com/send?phone=85293658409&text=Hello!%20I%27m%20testing%20the%20WhatsApp%20Chat%20plugin%20@https://quadlayers.com
+https://web.whatsapp.com/send?phone=85293658409&text=Hello!%20I%27m%20testing%20the%20WhatsApp%20Chat%20plugin%20@https://quadlayers.com
+
+
+URL encoder:
+https://www.urlencoder.org/
+
+For whatsapp web:
+https://web.whatsapp.com/send?phone=60103908902&text=Can%20i%20know%20more%20about%20it%3F%20%40http%3A%2F%2Fcrea8capital.com%2F
+
+For whatsapp app:
+https://wa.me/60103908902?text=Can%20i%20know%20more%20about%20it%3F%20%40http%3A%2F%2Fcrea8capital.com%2F
+
+cell.setValue(event.id).protect().setWarningOnly(true);
+
+function protectIDColumn_(sheet, headerRow, infoCol) {
+
+  for (const idCol of infoCol.ids) {
+    let A1Notation = lettersFromIndex_(idCol) + (headerRow+1).toString() + ":" + lettersFromIndex_(idCol);
+    let idRange = sheet.getRange(A1Notation);
+    idRange.protect().setWarningOnly(true);
+  }
+
+  return;
+
+}
