@@ -1,10 +1,6 @@
 /**
  * Person-in-charge:
  * - Loh Zi Jian, lohzi97@gmail.com
- * 
- * Characteristic:
- * - Event is differentiated by its title name. If the title has been changed, it will be treated as a new event.
- *   So instead of updating the previous event. A new event will be created and the old event will be deleted. 
  */
 
 /**
@@ -12,10 +8,9 @@
  * - All these need to be defined by user.
  */
 var spreadSheetURL = "https://docs.google.com/spreadsheets/d/1XdYDfoyke-NvJOv9T_4iK6hq3pWtUu74-Sl5WJ7dHZs/edit#gid=0";
-var sheetNames = ["Sheet1", "Sheet2"];
 var calendarID = "ttj425k3bbo0ktrns2tsvq8ln8@group.calendar.google.com";
 var headerColor = "#4a86e8";
-var noSyncString = "NOSYNC";
+var sheetNames = ["Sheet1", "Sheet2"];
 var headerString = [
   {
     'date': "Date",
@@ -33,13 +28,14 @@ var headerString = [
     'ids': ['CalendarEventID - Arti', 'CalendarEventID - Sto'],
     'prefix': ["Ar", "St"]
   }
-]
-var identificationString = "Calendar Sync";
+];
+var noSyncString = "NOSYNC";
 var syncPeriod = {
   'yearBefore': 1,
   'yearAfter': 3
-}
+};
 var syncMinutes = 15;
+var identificationString = "Calendar Sync";
 
 /**
  * A special function that runs when the spreadsheet is first
